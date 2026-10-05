@@ -1,0 +1,14 @@
+# Dependencies & build output
+/node_modules
+/.next
+/out
+/coverage
+*.tsbuildinfo
+next-env.d.ts
+
+# Secrets — never commit (copy .env.example instead)
+.env
+.env.local
+
+# Uploaded sample photos/documents (root folder only — NOT src/lib/storage)
+/storage/

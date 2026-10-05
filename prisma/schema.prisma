@@ -1,0 +1,426 @@
+// Pacific Surfaces — Lab ERP
+//
+// The central record is LabSample. Everything a sample "is made of" hangs off it
+// through child tables, never through comma-separated strings:
+//
+//   LabSample ─┬─ Formulation (role = MAIN_BODY | DESIGN_ROY_BODY | VEIN_ROY_BODY …)
+//              │     └─ FormulationComponent (kind = RESIN | GRIT | FILLER | PIGMENT)
+//              ├─ SampleDesignPattern   (many-to-many → MasterValue)
+//              ├─ SampleVeinMethod      (many-to-many → MasterValue)
+//              ├─ LabMeasurement        (stage × body → L, a, b)
+//              └─ SampleAttachment      (files live in storage, not in Postgres)
+//
+// Every dropdown value is a MasterValue row inside a MasterCategory, so lists
+// grow without schema changes, and a value used by history is disabled
+// (isActive = false) rather than deleted.
+
+generator client {
+  provider   = "prisma-client-js"
+  // Rust-free client: queries run through the pg driver adapter (src/lib/db.ts).
+  // Same code works locally and on Neon, and no native query engine ships.
+  engineType = "client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Neon: set DIRECT_URL to the non-pooled connection string for migrations.
+  // Locally it is the same as DATABASE_URL.
+  directUrl = env("DIRECT_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Users & access
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  MANAGER
+  OPERATOR
+  VIEWER
+}
+
+model User {
+  id           String    @id @default(cuid())
+  name         String
+  email        String    @unique
+  passwordHash String
+  role         Role      @default(OPERATOR)
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  samplesCreated    LabSample[]          @relation("SampleCreatedBy")
+  inwardCreated     InwardOutwardEntry[] @relation("InwardCreatedBy")
+  inwardUpdated     InwardOutwardEntry[] @relation("InwardUpdatedBy")
+  samplesUpdated    LabSample[]          @relation("SampleUpdatedBy")
+  masterValuesAdded MasterValue[]        @relation("MasterValueCreatedBy")
+  attachmentsAdded  SampleAttachment[]   @relation("AttachmentUploadedBy")
+  auditEntries      AuditLog[]
+  announcements     Announcement[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Master data (dynamic lookups)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A list of selectable values: Resins, Grits, Grit Sizes, Fillers, Pigments …
+/// New categories are rows here, not schema changes.
+model MasterCategory {
+  id          String   @id @default(cuid())
+  /// Stable key the code refers to, e.g. "RESIN". Never shown to users.
+  code        String   @unique
+  name        String
+  description String?
+  /// Whether users may add values from the data-entry form ("OTHER").
+  allowCustom Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  values MasterValue[]
+}
+
+model MasterValue {
+  id            String   @id @default(cuid())
+  categoryId    String
+  /// What users see, trimmed and with single spaces.
+  label         String
+  /// Lower-case, whitespace-collapsed label. "Glass" and " glass " collide here.
+  normalizedKey String
+  /// Optional behaviour hook for values the code reacts to (e.g. ROY_BODY opens
+  /// the Roy Body formulation). Labels can be renamed; codes do not change.
+  code          String?
+  isActive      Boolean  @default(true)
+  /// Seeded by the system (still editable/disable-able, just labelled).
+  isSystem      Boolean  @default(false)
+  sortOrder     Int      @default(100)
+  createdById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  category  MasterCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  createdBy User?          @relation("MasterValueCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  // Reverse relations — they are what makes a value "in use".
+  samplesAsType        LabSample[]            @relation("SampleType")
+  samplesAsMixer       LabSample[]            @relation("SampleMixerType")
+  componentsAsMaterial FormulationComponent[] @relation("ComponentMaterial")
+  componentsAsSize     FormulationComponent[] @relation("ComponentSize")
+  designPatternUses    SampleDesignPattern[]
+  veinMethodUses       SampleVeinMethod[]
+  inwardCompanyUses    InwardOutwardEntry[]
+  inwardPatternUses    InwardDesignPattern[]
+
+  @@unique([categoryId, normalizedKey])
+  @@unique([categoryId, code])
+  @@index([categoryId, isActive, sortOrder])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lab samples
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum SampleStatus {
+  DRAFT
+  SUBMITTED
+  // Later phases: UNDER_TEST, APPROVED, REJECTED, SENT_TO_PRODUCTION …
+}
+
+enum DesignCategory {
+  PLAIN_BODY
+  NON_PLAIN_BODY
+}
+
+enum MeasurementUnit {
+  GRAMS
+  PERCENT
+}
+
+model LabSample {
+  id                    String          @id @default(cuid())
+  /// S.No. — sequential, unique, assigned by the server.
+  serialNo              Int             @unique
+  /// Slab number — suggested as the next free number, unique when present.
+  slabNumber            Int?            @unique
+  sampleDate            DateTime        @db.Date
+  status                SampleStatus    @default(SUBMITTED)
+  sampleTypeId          String?
+  numberOfBodies        Int?
+  designCategory        DesignCategory?
+  mixerTypeId           String?
+  hasVein               Boolean?
+  veinNotes             String?
+  remarks               String?
+  /// Inspired samples only: is the physical sample in the lab?
+  /// Yes → recorded in Inward / Outward. No → listed under Rectification.
+  physicalSamplePresent Boolean?
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  sampleType MasterValue? @relation("SampleType", fields: [sampleTypeId], references: [id], onDelete: Restrict)
+  mixerType  MasterValue? @relation("SampleMixerType", fields: [mixerTypeId], references: [id], onDelete: Restrict)
+  createdBy  User?        @relation("SampleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy  User?        @relation("SampleUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  formulations   Formulation[]
+  designPatterns SampleDesignPattern[]
+  veinMethods    SampleVeinMethod[]
+  measurements   LabMeasurement[]
+  attachments    SampleAttachment[]
+  inwardEntry    InwardOutwardEntry?
+
+  @@index([sampleDate])
+  @@index([status])
+  @@index([sampleTypeId])
+  @@index([createdAt])
+  @@index([physicalSamplePresent])
+}
+
+/// Which body of the sample a formulation describes. One reusable structure
+/// serves the main body, the Roy Body opened from Design, the Roy Body opened
+/// from Vein, and any body type added later.
+enum FormulationRole {
+  MAIN_BODY
+  DESIGN_ROY_BODY
+  VEIN_ROY_BODY
+}
+
+/// Belongs to exactly one owner: a lab sample OR an inward/outward entry
+/// (enforced in the service layer). New owners add one nullable FK here.
+model Formulation {
+  id            String          @id @default(cuid())
+  sampleId      String?
+  inwardEntryId String?
+  role          FormulationRole
+  /// Reserved for per-body formulations (Body 1, Body 2 …). 1 today.
+  bodyIndex     Int             @default(1)
+  notes         String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  sample      LabSample?             @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+  inwardEntry InwardOutwardEntry?    @relation(fields: [inwardEntryId], references: [id], onDelete: Cascade)
+  components  FormulationComponent[]
+
+  @@unique([sampleId, role, bodyIndex])
+  @@unique([inwardEntryId, role, bodyIndex])
+}
+
+enum ComponentKind {
+  RESIN
+  GRIT
+  FILLER
+  PIGMENT
+}
+
+model FormulationComponent {
+  id            String           @id @default(cuid())
+  formulationId String
+  kind          ComponentKind
+  /// The resin / grit / filler / pigment, from its master list.
+  materialId    String?
+  /// Grit size (GRIT rows only).
+  sizeId        String?
+  unit          MeasurementUnit?
+  quantity      Decimal?         @db.Decimal(14, 4)
+  sortOrder     Int              @default(0)
+
+  formulation Formulation  @relation(fields: [formulationId], references: [id], onDelete: Cascade)
+  material    MasterValue? @relation("ComponentMaterial", fields: [materialId], references: [id], onDelete: Restrict)
+  size        MasterValue? @relation("ComponentSize", fields: [sizeId], references: [id], onDelete: Restrict)
+
+  @@index([formulationId, kind])
+  @@index([materialId])
+}
+
+model SampleDesignPattern {
+  sampleId  String
+  patternId String
+  sortOrder Int    @default(0)
+
+  sample  LabSample   @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+  pattern MasterValue @relation(fields: [patternId], references: [id], onDelete: Restrict)
+
+  @@id([sampleId, patternId])
+  @@index([patternId])
+}
+
+model SampleVeinMethod {
+  sampleId  String
+  methodId  String
+  sortOrder Int    @default(0)
+
+  sample LabSample   @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+  method MasterValue @relation(fields: [methodId], references: [id], onDelete: Restrict)
+
+  @@id([sampleId, methodId])
+  @@index([methodId])
+}
+
+enum MeasurementStage {
+  POST_PRESS
+  POST_POLISH
+}
+
+model LabMeasurement {
+  id        String           @id @default(cuid())
+  sampleId  String
+  stage     MeasurementStage
+  bodyIndex Int
+  l         Decimal?         @db.Decimal(8, 3)
+  a         Decimal?         @db.Decimal(8, 3)
+  b         Decimal?         @db.Decimal(8, 3)
+
+  sample LabSample @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+
+  @@unique([sampleId, stage, bodyIndex])
+}
+
+enum AttachmentPurpose {
+  SAMPLE_OUTPUT
+}
+
+/// Metadata only — the bytes live in the storage driver (local disk now,
+/// object storage in production) under `storageKey`.
+model SampleAttachment {
+  id           String            @id @default(cuid())
+  /// Null until the sample is saved; unlinked uploads are cleaned up by a job.
+  sampleId     String?
+  purpose      AttachmentPurpose @default(SAMPLE_OUTPUT)
+  originalName String
+  storageKey   String            @unique
+  mimeType     String
+  sizeBytes    Int
+  sha256       String
+  uploadedById String?
+  createdAt    DateTime          @default(now())
+
+  sample     LabSample? @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+  uploadedBy User?      @relation("AttachmentUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([sampleId])
+  @@index([sha256])
+  @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Inward / Outward samples
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A physical sample received from (or sent to) a company. When it started as
+/// an Inspired lab sample, `labSampleId` links the two.
+model InwardOutwardEntry {
+  id                 String          @id @default(cuid())
+  /// Serial number — sequential, unique, assigned by the server.
+  serialNo           Int             @unique
+  /// The entry's date (defaults to the day it is recorded; can be changed).
+  entryDate          DateTime        @default(now()) @db.Date
+  labSampleId        String?         @unique
+  companyId          String?
+  sampleDesignName   String?
+  numberOfBodies     Int?
+  designCategory     DesignCategory?
+  recreationAttempts String?
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  labSample LabSample?   @relation(fields: [labSampleId], references: [id], onDelete: SetNull)
+  company   MasterValue? @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  createdBy User?        @relation("InwardCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?        @relation("InwardUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  designPatterns InwardDesignPattern[]
+  measurements   InwardMeasurement[]
+  formulations   Formulation[]
+
+  @@index([companyId])
+  @@index([entryDate])
+  @@index([createdAt])
+}
+
+model InwardDesignPattern {
+  entryId   String
+  patternId String
+  sortOrder Int    @default(0)
+
+  entry   InwardOutwardEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  pattern MasterValue        @relation(fields: [patternId], references: [id], onDelete: Restrict)
+
+  @@id([entryId, patternId])
+  @@index([patternId])
+}
+
+/// One L/a/b reading per body (no Post Press / Post Polish split here).
+model InwardMeasurement {
+  id        String   @id @default(cuid())
+  entryId   String
+  bodyIndex Int
+  l         Decimal? @db.Decimal(8, 3)
+  a         Decimal? @db.Decimal(8, 3)
+  b         Decimal? @db.Decimal(8, 3)
+
+  entry InwardOutwardEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@unique([entryId, bodyIndex])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dashboard: requests & announcements
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum AnnouncementKind {
+  TASK
+  INSTRUCTION
+  QUERY
+  ANNOUNCEMENT
+  PRODUCTION
+  OTHER
+}
+
+/// Posted by the Lab Head / Plant Head / CEO for the lab team. Removing one
+/// archives it (kept for the record), it is never physically deleted.
+model Announcement {
+  id          String           @id @default(cuid())
+  kind        AnnouncementKind @default(ANNOUNCEMENT)
+  title       String
+  message     String
+  important   Boolean          @default(false)
+  isArchived  Boolean          @default(false)
+  createdById String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([isArchived, important, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Audit
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Append-only trail. A deleted sample's full record survives here as JSON.
+model AuditLog {
+  id         String   @id @default(cuid())
+  entityType String
+  entityId   String
+  action     String
+  summary    String?
+  snapshot   Json?
+  userId     String?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
