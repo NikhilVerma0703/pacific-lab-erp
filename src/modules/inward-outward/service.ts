@@ -7,7 +7,7 @@ import type { CurrentUser } from "@/lib/session";
 import { MASTER, VALUE_CODE, type MasterCode } from "@/modules/master-data/catalog";
 import { MasterValueError, resolveMasterRef } from "@/modules/master-data/service";
 import type { MasterRef } from "@/modules/master-data/types";
-import { formulationInclude, writeFormulation } from "@/modules/formulation/service";
+import { formulationInclude, writeRoyBody } from "@/modules/formulation/service";
 import { codesOf, todayInPlant } from "@/modules/samples/service";
 import type { InwardFormData } from "./schema";
 
@@ -121,7 +121,7 @@ export async function saveInward(args: {
             });
           }
           if ((await codesOf(tx, patternIds)).has(VALUE_CODE.ROY_BODY)) {
-            await writeFormulation(tx, { inwardEntryId: entry.id }, "DESIGN_ROY_BODY", data.designRoyBody, resolve);
+            await writeRoyBody(tx, { inwardEntryId: entry.id }, "DESIGN_ROY_BODY", data.designRoyBody, resolve);
           }
         }
 

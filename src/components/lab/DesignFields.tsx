@@ -8,11 +8,11 @@ import { Segmented } from "@/components/ui/Segmented";
 import { MASTER, VALUE_CODE } from "@/modules/master-data/catalog";
 import type { MasterRef } from "@/modules/master-data/types";
 import { errorAt, hasCode, useSampleFormEnv } from "./form-context";
-import { FormulationFields } from "./FormulationFields";
+import { RoyBodyFields } from "./RoyBodyFields";
 
 /**
- * Plain / Non-Plain body, the pattern multi-select, and the Roy Body
- * formulation that opens when ROY BODY is picked. Used by every form that
+ * Plain / Non-Plain body, the pattern multi-select, and the complete Roy Body
+ * (n, formulation, vein, L/a/b) that opens when ROY BODY is picked. Used by every form that
  * records a design; the form must have `designCategory`, `designPatterns`
  * and `designRoyBody` fields.
  */
@@ -69,7 +69,7 @@ export function DesignFields({ idPrefix, royTitle = "Roy Body Formulation — De
       )}
       {showRoy && (
         <FormSection tone="nested" index="R" title={royTitle} description="Opened because ROY BODY is selected">
-          <FormulationFields name="designRoyBody" idPrefix={`${idPrefix}roy`} />
+          <RoyBodyFields name="designRoyBody" idPrefix={`${idPrefix}roy`} />
         </FormSection>
       )}
     </div>

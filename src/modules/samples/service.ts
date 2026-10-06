@@ -9,7 +9,7 @@ import { MASTER, VALUE_CODE, type MasterCode } from "@/modules/master-data/catal
 import { MasterValueError, resolveMasterRef } from "@/modules/master-data/service";
 import type { MasterRef } from "@/modules/master-data/types";
 import { lockNumbering, nextSerialNo, nextSlabNumber } from "./numbering";
-import { formulationInclude, writeFormulation } from "@/modules/formulation/service";
+import { formulationInclude, writeFormulation, writeRoyBody } from "@/modules/formulation/service";
 import type { SampleFormData } from "./schema";
 
 export class SampleSaveError extends Error {
@@ -124,6 +124,7 @@ export async function saveSample(args: {
         sampleDate,
         status,
         sampleTypeId,
+        designName: data.designName,
         numberOfBodies: isCreative ? data.numberOfBodies : null,
         designCategory: isCreative ? data.designCategory : null,
         mixerTypeId,
@@ -161,7 +162,7 @@ export async function saveSample(args: {
             });
           }
           if ((await codesOf(tx, patternIds)).has(VALUE_CODE.ROY_BODY)) {
-            await writeFormulation(tx, { sampleId: sample.id }, "DESIGN_ROY_BODY", data.designRoyBody, resolve);
+            await writeRoyBody(tx, { sampleId: sample.id }, "DESIGN_ROY_BODY", data.designRoyBody, resolve);
           }
         }
 

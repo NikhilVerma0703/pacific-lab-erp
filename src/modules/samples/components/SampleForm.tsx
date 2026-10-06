@@ -24,6 +24,7 @@ import type { AttachmentDTO } from "../queries";
 import { MAX_BODIES, sampleFormSchema, type SampleFormData, type SampleFormInput } from "../schema";
 import { AttachmentsField } from "./AttachmentsField";
 import { LabMeasurementsFields } from "./LabMeasurementsFields";
+import { VeinFields } from "@/components/lab/VeinFields";
 
 export interface SampleFormPermissions {
   overrideNumbers: boolean;
@@ -63,12 +64,9 @@ export function SampleForm({ mode, sampleId, defaults, attachments: initialFiles
   // ── watched values that drive the layout ───────────────────────────────────
   const sampleType = useWatch({ control, name: "sampleType" });
   const physicalPresent = useWatch({ control, name: "physicalSamplePresent" });
-  const hasVein = useWatch({ control, name: "hasVein" });
-  const veinMethods = useWatch({ control, name: "veinMethods" });
 
   const isCreative = hasCode([sampleType], options[MASTER.SAMPLE_TYPE], VALUE_CODE.CREATIVE_SAMPLE);
   const isInspired = hasCode([sampleType], options[MASTER.SAMPLE_TYPE], VALUE_CODE.INSPIRED_SAMPLE);
-  const showVeinRoy = hasVein !== "NO" && hasCode(veinMethods ?? [], options[MASTER.VEIN_METHOD], VALUE_CODE.ROY_BODY);
 
   // One L/a/b row per body on each side, preserving what was typed.
   const n = useBodyRows(methods, "numberOfBodies", ["postPress", "postPolish"]);
@@ -178,7 +176,7 @@ export function SampleForm({ mode, sampleId, defaults, attachments: initialFiles
 
           {/* 1 · Basic information */}
           <FormSection index={next()} title="Basic Information" description="Identity of the sample">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
               <Field label="Date" htmlFor="sampleDate" error={errorAt(errors, "sampleDate")}>
                 <input
                   id="sampleDate"
@@ -230,6 +228,9 @@ export function SampleForm({ mode, sampleId, defaults, attachments: initialFiles
                     />
                   )}
                 />
+              </Field>
+              <Field label="Design Name" htmlFor="designName" error={errorAt(errors, "designName")}>
+                <input id="designName" className={cn("input", errorAt(errors, "designName") && "input-error")} autoComplete="off" {...register("designName")} />
               </Field>
             </div>
             {isCreative && (
@@ -302,80 +303,9 @@ export function SampleForm({ mode, sampleId, defaults, attachments: initialFiles
                 <DesignFields idPrefix="d" />
               </FormSection>
 
-              {/* Mixer type */}
-              <FormSection index={next()} title="Mixer Type">
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  <Field label="Mixer Type" htmlFor="mixerType">
-                    <Controller
-                      control={control}
-                      name="mixerType"
-                      render={({ field }) => (
-                        <MasterPicker
-                          id="mixerType"
-                          options={options[MASTER.MIXER_TYPE]}
-                          value={field.value ?? null}
-                          onChange={field.onChange}
-                          allowCustom={permissions.addMaster}
-                          noun="mixer type"
-                          placeholder="Select mixer type"
-                        />
-                      )}
-                    />
-                  </Field>
-                </div>
-              </FormSection>
-
               {/* Vein */}
               <FormSection index={next()} title="Vein">
-                <div className="space-y-4">
-                  <Field label="Vein" htmlFor="hasVein">
-                    <Controller
-                      control={control}
-                      name="hasVein"
-                      render={({ field }) => (
-                        <Segmented
-                          id="hasVein"
-                          value={field.value ?? ""}
-                          onChange={field.onChange}
-                          options={[
-                            { value: "YES", label: "Yes — has vein" },
-                            { value: "NO", label: "No vein" },
-                          ]}
-                        />
-                      )}
-                    />
-                  </Field>
-                  {hasVein !== "NO" && (
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      <Field label="How Vein Introduced" htmlFor="veinMethods" error={errorAt(errors, "veinMethods")} hint="Select every technique used.">
-                        <Controller
-                          control={control}
-                          name="veinMethods"
-                          render={({ field }) => (
-                            <MasterPicker
-                              id="veinMethods"
-                              multiple
-                              options={options[MASTER.VEIN_METHOD]}
-                              value={field.value ?? []}
-                              onChange={field.onChange}
-                              allowCustom={permissions.addMaster}
-                              noun="method"
-                              placeholder="Select methods"
-                            />
-                          )}
-                        />
-                      </Field>
-                      <Field label="Vein details" htmlFor="veinNotes" error={errorAt(errors, "veinNotes")} hint="Colour, thickness, direction …">
-                        <textarea id="veinNotes" rows={2} className="input" {...register("veinNotes")} />
-                      </Field>
-                    </div>
-                  )}
-                  {showVeinRoy && (
-                    <FormSection tone="nested" index="R" title="Roy Body Formulation — Vein" description="Opened because ROY BODY is selected in How Vein Introduced">
-                      <FormulationFields name="veinRoyBody" idPrefix="vroy" />
-                    </FormSection>
-                  )}
-                </div>
+                <VeinFields royIdPrefix="vroy" royTitle="Roy Body Formulation — Vein" />
               </FormSection>
 
               {/* L a b */}

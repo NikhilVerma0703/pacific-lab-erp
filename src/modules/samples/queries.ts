@@ -2,7 +2,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { sampleInclude } from "./service";
-import { emptyFormulation, emptyLabRow, type FormulationInput, type SampleFormInput } from "./schema";
+import { emptyFormulation, emptyLabRow, emptyRoyBody, type FormulationInput, type RoyBodyInput, type SampleFormInput } from "./schema";
 import type { MasterRef } from "@/modules/master-data/types";
 
 // ── DTOs (plain JSON — safe to pass to client components) ────────────────────
@@ -25,6 +25,15 @@ export interface ComponentDTO {
 export interface FormulationDTO {
   role: "MAIN_BODY" | "DESIGN_ROY_BODY" | "VEIN_ROY_BODY";
   components: ComponentDTO[];
+  /** Roy Body (from Design) details — empty / null for plain formulations. */
+  numberOfBodies: number | null;
+  hasVein: boolean | null;
+  veinNotes: string | null;
+  mixerType: ValueDTO | null;
+  veinMethods: ValueDTO[];
+  measurements: MeasurementDTO[];
+  /** The Roy Body opened from this Roy Body's own Vein. */
+  veinRoyBody: { components: ComponentDTO[] } | null;
 }
 
 export interface MeasurementDTO {
@@ -50,6 +59,7 @@ export interface SampleDetail {
   sampleDate: string;
   status: "DRAFT" | "SUBMITTED";
   sampleType: ValueDTO | null;
+  designName: string | null;
   physicalSamplePresent: boolean | null;
   /** The Inward / Outward entry recorded for this (Inspired) sample, if any. */
   inwardEntry: { id: string; serialNo: number } | null;
@@ -76,16 +86,26 @@ export const dec = (d: Prisma.Decimal | null) => (d === null ? null : d.toString
 
 type FormulationWithComponents = SampleWithAll["formulations"][number];
 
+const toComponentDTO = (c: FormulationWithComponents["components"][number]): ComponentDTO => ({
+  kind: c.kind,
+  material: c.material,
+  size: c.size,
+  unit: c.unit,
+  quantity: dec(c.quantity),
+});
+
 export function toFormulationDTO(f: FormulationWithComponents): FormulationDTO {
+  const nested = f.children.find((c) => c.role === "VEIN_ROY_BODY");
   return {
     role: f.role,
-    components: f.components.map((c) => ({
-      kind: c.kind,
-      material: c.material,
-      size: c.size,
-      unit: c.unit,
-      quantity: dec(c.quantity),
-    })),
+    components: f.components.map(toComponentDTO),
+    numberOfBodies: f.numberOfBodies,
+    hasVein: f.hasVein,
+    veinNotes: f.veinNotes,
+    mixerType: f.mixerType,
+    veinMethods: f.veinMethods.map((m) => m.method),
+    measurements: f.measurements.map((m) => ({ stage: m.stage, bodyIndex: m.bodyIndex, l: dec(m.l), a: dec(m.a), b: dec(m.b) })),
+    veinRoyBody: nested ? { components: nested.components.map(toComponentDTO) } : null,
   };
 }
 
@@ -97,6 +117,7 @@ export function toDetail(s: SampleWithAll): SampleDetail {
     sampleDate: s.sampleDate.toISOString().slice(0, 10),
     status: s.status,
     sampleType: s.sampleType,
+    designName: s.designName,
     physicalSamplePresent: s.physicalSamplePresent,
     inwardEntry: s.inwardEntry,
     numberOfBodies: s.numberOfBodies,
@@ -142,7 +163,12 @@ export function referencedValueIds(d: SampleDetail): string[] {
   add(d.mixerType);
   d.designPatterns.forEach(add);
   d.veinMethods.forEach(add);
-  d.formulations.forEach((f) => f.components.forEach((c) => (add(c.material), add(c.size))));
+  d.formulations.forEach((f) => {
+    f.components.forEach((c) => (add(c.material), add(c.size)));
+    f.veinRoyBody?.components.forEach((c) => (add(c.material), add(c.size)));
+    add(f.mixerType);
+    f.veinMethods.forEach(add);
+  });
   return [...ids];
 }
 
@@ -150,7 +176,7 @@ export function referencedValueIds(d: SampleDetail): string[] {
 
 const ref = (v: ValueDTO | null): MasterRef | null => (v ? { id: v.id, label: v.label } : null);
 
-export function formulationToInput(f: FormulationDTO | undefined): FormulationInput {
+export function formulationToInput(f: Pick<FormulationDTO, "components"> | null | undefined): FormulationInput {
   if (!f) return emptyFormulation();
   const rows = (kind: ComponentDTO["kind"]) =>
     f.components
@@ -173,6 +199,30 @@ export function formulationToInput(f: FormulationDTO | undefined): FormulationIn
   };
 }
 
+const labInput = (ms: MeasurementDTO[], n: number, stage: MeasurementDTO["stage"]) =>
+  Array.from({ length: n }, (_, i) => {
+    const m = ms.find((x) => x.stage === stage && x.bodyIndex === i + 1);
+    const s = (v: string | null) => (v === null ? "" : String(Number(v)));
+    return m ? { l: s(m.l), a: s(m.a), b: s(m.b) } : emptyLabRow();
+  });
+
+/** A saved Roy Body back into its form shape. */
+export function royBodyToInput(f: FormulationDTO | null | undefined): RoyBodyInput {
+  if (!f) return emptyRoyBody();
+  const n = f.numberOfBodies ?? 0;
+  return {
+    ...formulationToInput(f),
+    numberOfBodies: f.numberOfBodies === null ? "" : String(f.numberOfBodies),
+    hasVein: f.hasVein === null ? "" : f.hasVein ? "YES" : "NO",
+    mixerType: ref(f.mixerType),
+    veinMethods: f.veinMethods.map((m) => ({ id: m.id, label: m.label })),
+    veinNotes: f.veinNotes ?? "",
+    veinRoyBody: formulationToInput(f.veinRoyBody),
+    postPress: labInput(f.measurements, n, "POST_PRESS"),
+    postPolish: labInput(f.measurements, n, "POST_POLISH"),
+  };
+}
+
 export function toFormInput(d: SampleDetail): SampleFormInput {
   const n = d.numberOfBodies ?? 0;
   const lab = (stage: MeasurementDTO["stage"]) =>
@@ -186,12 +236,13 @@ export function toFormInput(d: SampleDetail): SampleFormInput {
     slabNumber: d.slabNumber === null ? "" : String(d.slabNumber),
     sampleDate: d.sampleDate,
     sampleType: ref(d.sampleType),
+    designName: d.designName ?? "",
     physicalSamplePresent: d.physicalSamplePresent === null ? "" : d.physicalSamplePresent ? "YES" : "NO",
     numberOfBodies: d.numberOfBodies === null ? "" : String(d.numberOfBodies),
     main: formulationToInput(d.formulations.find((f) => f.role === "MAIN_BODY")),
     designCategory: d.designCategory ?? "",
     designPatterns: d.designPatterns.map((p) => ({ id: p.id, label: p.label })),
-    designRoyBody: formulationToInput(d.formulations.find((f) => f.role === "DESIGN_ROY_BODY")),
+    designRoyBody: royBodyToInput(d.formulations.find((f) => f.role === "DESIGN_ROY_BODY")),
     mixerType: ref(d.mixerType),
     hasVein: d.hasVein === null ? "" : d.hasVein ? "YES" : "NO",
     veinMethods: d.veinMethods.map((m) => ({ id: m.id, label: m.label })),

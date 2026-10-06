@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FormulationView } from "@/components/lab/FormulationView";
+import { RoyBodyView } from "@/components/lab/RoyBodyView";
 import { formatDate, formatDateTime, formatNumber } from "@/lib/utils";
 import { Block, Grid, Item, Nested } from "@/modules/samples/components/SampleDetailView";
 import type { InwardDetail } from "../queries";
@@ -75,7 +75,7 @@ export function InwardDetailView({ e }: { e: InwardDetail }) {
         </Grid>
         {hasRoy && (
           <Nested title="Roy Body Formulation">
-            <FormulationView f={e.royBody ?? undefined} />
+            <RoyBodyView f={e.royBody} />
           </Nested>
         )}
       </Block>

@@ -38,14 +38,17 @@ export function LabRowsFields({
   n,
   title,
   dot = "brand",
+  labelPrefix = "",
 }: {
   name: string;
   n: number;
   title?: string;
   dot?: "brand" | "accent";
+  /** Prepended to the accessible labels when one form has several L/a/b blocks. */
+  labelPrefix?: string;
 }) {
   const { register, formState } = useFormContext<FieldValues>();
-  const label = title ?? "L/a/b";
+  const label = `${labelPrefix}${title ?? "L/a/b"}`;
   return (
     <div>
       {title && (

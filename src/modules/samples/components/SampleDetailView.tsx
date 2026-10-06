@@ -5,6 +5,7 @@ import { useState } from "react";
 import { cn, formatDate, formatDateTime, formatNumber } from "@/lib/utils";
 import type { FormulationDTO, SampleDetail } from "../queries";
 import { FormulationView } from "@/components/lab/FormulationView";
+import { RoyBodyView } from "@/components/lab/RoyBodyView";
 import { AttachmentCard } from "./AttachmentsField";
 import { FileViewer, type ViewableFile } from "./FileViewer";
 
@@ -26,6 +27,7 @@ export function SampleDetailView({ s }: { s: SampleDetail }) {
           <Item label="Slab Number" value={s.slabNumber} />
           <Item label="Date" value={formatDate(s.sampleDate)} />
           <Item label="Sample Type" value={s.sampleType?.label} />
+          <Item label="Design Name" value={s.designName} />
           {isCreative && <Item label="Number of Bodies" value={s.numberOfBodies} />}
           {s.sampleType?.code === "INSPIRED" && (
             <Item
@@ -62,20 +64,15 @@ export function SampleDetailView({ s }: { s: SampleDetail }) {
             </Grid>
             {hasRoy(s.designPatterns) && (
               <Nested title="Roy Body Formulation — Design">
-                <FormulationView f={f("DESIGN_ROY_BODY")} />
+                <RoyBodyView f={f("DESIGN_ROY_BODY")} />
               </Nested>
             )}
-          </Block>
-
-          <Block index={idx()} title="Mixer Type">
-            <Grid>
-              <Item label="Mixer Type" value={s.mixerType?.label} />
-            </Grid>
           </Block>
 
           <Block index={idx()} title="Vein">
             <Grid>
               <Item label="Vein" value={s.hasVein === null ? null : s.hasVein ? "Yes" : "No"} />
+              <Item label="Mixer Type" value={s.mixerType?.label} />
               <Item label="How Vein Introduced" value={s.veinMethods.map((m) => m.label).join(", ")} wide />
               <Item label="Vein details" value={s.veinNotes} wide />
             </Grid>

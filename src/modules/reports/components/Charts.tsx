@@ -268,7 +268,6 @@ export function ConsumptionChart({ data }: { data: ReportData }) {
   );
 
   const notes: string[] = [];
-  if (c.percentRows) notes.push(`${c.percentRows} ${label.toLowerCase()} entr${c.percentRows === 1 ? "y was" : "ies were"} recorded in % and ${c.percentRows === 1 ? "is" : "are"} not added to the weight`);
   if (c.missingQtyRows) notes.push(`${c.missingQtyRows} had no quantity`);
 
   return (

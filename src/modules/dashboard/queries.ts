@@ -50,11 +50,13 @@ export async function getDashboard(): Promise<DashboardData> {
     inwardPatterns,
     plainUsed,
     inwardNames,
+    sampleNames,
   ] = await Promise.all([
     prisma.labSample.findMany({
       where: { sampleDate: day },
       select: {
         designCategory: true,
+        designName: true,
         sampleType: { select: { code: true } },
         designPatterns: patternSelect,
       },
@@ -78,10 +80,17 @@ export async function getDashboard(): Promise<DashboardData> {
       distinct: ["sampleDesignName"],
       select: { sampleDesignName: true },
     }),
+    prisma.labSample.findMany({
+      where: { designName: { not: null } },
+      distinct: ["designName"],
+      select: { designName: true },
+    }),
   ]);
 
   const todayDesigns = tallyDesigns([
-    ...todaySamples.flatMap((s) => designsOf({ designCategory: s.designCategory, patterns: s.designPatterns.map((p) => p.pattern.label) })),
+    ...todaySamples.flatMap((s) =>
+      designsOf({ designCategory: s.designCategory, patterns: s.designPatterns.map((p) => p.pattern.label), designName: s.designName }),
+    ),
     ...todayInward.flatMap((e) =>
       designsOf({ designCategory: e.designCategory, patterns: e.designPatterns.map((p) => p.pattern.label), designName: e.sampleDesignName }),
     ),
@@ -92,6 +101,7 @@ export async function getDashboard(): Promise<DashboardData> {
     ...inwardPatterns.map((p) => p.pattern.label),
     ...(plainUsed ? ["Plain Body"] : []),
     ...inwardNames.map((n) => n.sampleDesignName),
+    ...sampleNames.map((n) => n.designName),
   ]);
 
   const lab = todaySamples.length;

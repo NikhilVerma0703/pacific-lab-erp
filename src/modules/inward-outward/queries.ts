@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { VALUE_CODE } from "@/modules/master-data/catalog";
 import {
   dec,
-  formulationToInput,
+  royBodyToInput,
   toFormulationDTO,
   type FormulationDTO,
   type ValueDTO,
@@ -67,10 +67,12 @@ export function inwardReferencedIds(d: InwardDetail): string[] {
   const ids = new Set<string>();
   if (d.company) ids.add(d.company.id);
   d.designPatterns.forEach((p) => ids.add(p.id));
-  d.royBody?.components.forEach((c) => {
+  for (const c of [...(d.royBody?.components ?? []), ...(d.royBody?.veinRoyBody?.components ?? [])]) {
     if (c.material) ids.add(c.material.id);
     if (c.size) ids.add(c.size.id);
-  });
+  }
+  if (d.royBody?.mixerType) ids.add(d.royBody.mixerType.id);
+  d.royBody?.veinMethods.forEach((m) => ids.add(m.id));
   return [...ids];
 }
 
@@ -90,7 +92,7 @@ export function inwardToFormInput(d: InwardDetail): InwardFormInput {
     }),
     designCategory: d.designCategory ?? "",
     designPatterns: d.designPatterns.map((p) => ({ id: p.id, label: p.label })),
-    designRoyBody: formulationToInput(d.royBody ?? undefined),
+    designRoyBody: royBodyToInput(d.royBody),
     recreationAttempts: d.recreationAttempts ?? "",
   };
 }

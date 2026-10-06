@@ -5,12 +5,12 @@
  */
 import { z } from "zod";
 import {
-  emptyFormulation,
-  formulationSchema,
+  emptyRoyBody,
   labRowSchema,
   masterRefSchema,
   MAX_BODIES,
   optionalNumber,
+  royBodySchema,
 } from "@/modules/samples/schema";
 
 const optionalText = (max: number) =>
@@ -42,7 +42,7 @@ export const inwardFormSchema = z
     measurements: z.array(labRowSchema).max(MAX_BODIES),
     designCategory: z.enum(["", "PLAIN_BODY", "NON_PLAIN_BODY"]).transform((v) => (v === "" ? null : v)),
     designPatterns: z.array(masterRefSchema).max(30),
-    designRoyBody: formulationSchema,
+    designRoyBody: royBodySchema,
     recreationAttempts: optionalText(4000),
   })
   .superRefine((v, ctx) => {
@@ -74,7 +74,7 @@ export function newInwardInput(args: { serialNo: number; today: string; labSampl
     measurements: [],
     designCategory: "",
     designPatterns: [],
-    designRoyBody: emptyFormulation(),
+    designRoyBody: emptyRoyBody(),
     recreationAttempts: "",
   };
 }

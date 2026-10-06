@@ -120,3 +120,13 @@ Key decisions:
 ## Sign-in (off for now)
 
 Authentication was removed at the client's request. `lib/session.ts` returns one built-in Admin user (created on first use from `SEED_ADMIN_EMAIL` / `SEED_ADMIN_NAME`), so "created by" stays meaningful. Permission checks (`can()` / `requirePermission()`) are unchanged and still run on every action; with the Admin role they all pass. Re-enabling sign-in = making `currentUser()` read a session again (e.g. Auth.js v5 credentials) and adding a login page; the `User.passwordHash` / `role` columns are already there.
+
+## Quantities are grams only
+
+The Measurement (unit) dropdowns were removed from every formulation (Resin, Grits, Filler, Pigment, all Roy Body forms). Every quantity is entered as **Quantity (gm)** and saved with unit `GRAMS`. The `unit` column stays in the database so values recorded in % before this change keep their meaning; they are shown as "30 %" and are not added into gram totals.
+
+## Roy Body (from Design) is a complete body
+
+When ROY BODY is picked under Design (Sample Data Entry and Inward / Outward), the Roy Body form has, in order: **Number of Bodies (n)** → **Material Choices & Pigments** (Resin, Grits, Filler, Pigments, all Quantity (gm)) → **Vein** (Vein Yes/No, Mixer Type, How Vein Introduced, Vein details, and — when ROY BODY is one of its methods — a nested Roy Body formulation) → **L, a, b Values** (Post Press / Post Polish, one row per body of the Roy Body's own n).
+
+Storage: the Roy Body stays one `Formulation` row (role `DESIGN_ROY_BODY`) with extra columns `numberOfBodies`, `hasVein`, `veinNotes`, `mixerTypeId`; its vein methods are `FormulationVeinMethod` rows, its readings `FormulationMeasurement` rows, and the nested vein Roy Body is a child `Formulation` (`parentId`, role `VEIN_ROY_BODY`). Everything cascades with the sample / entry. UI: `components/lab/RoyBodyFields.tsx` and the shared `VeinFields.tsx` (the main Vein section uses the same component); server: `writeRoyBody()` in `modules/formulation/service.ts`. Material consumption (Reports, Downloads) includes the nested Roy Body's quantities.

@@ -51,7 +51,6 @@ export default async function DownloadsPage({ searchParams }: { searchParams: Pr
   }
   const mk = filters.materialKind;
   const total = results?.reduce((a, r) => a + (r.consumption?.grams ?? 0), 0) ?? 0;
-  const pct = results?.reduce((a, r) => a + (r.consumption?.percentEntries ?? 0), 0) ?? 0;
   const chips = [
     labels.sampleType,
     labels.design,
@@ -109,7 +108,6 @@ export default async function DownloadsPage({ searchParams }: { searchParams: Pr
                     {labels.material ?? MATERIAL_KIND_LABEL[mk]} consumed
                   </p>
                   <p className="text-xl font-bold tabular-nums">{formatGrams(total)}</p>
-                  {pct > 0 && <p className="text-[11px] text-ink-3">+ {pct} entr{pct === 1 ? "y" : "ies"} in % (not a weight)</p>}
                 </div>
               )}
               <a

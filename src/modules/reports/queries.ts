@@ -3,6 +3,8 @@ import { prisma } from "@/lib/db";
 import { todayInPlant } from "@/modules/samples/service";
 import { buildReport, dateWindow, type ReportData, type ReportRange, type ReportSampleRow } from "./build";
 
+const componentSelect = { kind: true, unit: true, quantity: true, material: { select: { label: true } } } as const;
+
 /** Every sample dated inside the window, with what the reports need. */
 export async function getReport(days: ReportRange): Promise<ReportData> {
   const today = todayInPlant();
@@ -22,9 +24,9 @@ export async function getReport(days: ReportRange): Promise<ReportData> {
       },
       formulations: {
         select: {
-          components: {
-            select: { kind: true, unit: true, quantity: true, material: { select: { label: true } } },
-          },
+          components: { select: componentSelect },
+          // The Roy Body opened from a Roy Body's own Vein.
+          children: { select: { components: { select: componentSelect } } },
         },
       },
     },
@@ -40,7 +42,7 @@ export async function getReport(days: ReportRange): Promise<ReportData> {
       patterns: design.designPatterns.map((p) => p.pattern.label),
       // Main body + every Roy Body: all of it was consumed making the sample.
       components: s.formulations.flatMap((f) =>
-        f.components.map((c) => ({
+        [...f.components, ...f.children.flatMap((ch) => ch.components)].map((c) => ({
           kind: c.kind,
           unit: c.unit,
           quantity: c.quantity === null ? null : Number(c.quantity),

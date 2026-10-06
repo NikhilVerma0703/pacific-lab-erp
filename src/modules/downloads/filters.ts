@@ -75,8 +75,9 @@ export interface Consumption {
   detail: string;
 }
 
+/** Every component of a sample — main body, Roy Bodies, and a Roy Body's own vein Roy Body. */
 export function allComponents(s: Pick<SampleDetail, "formulations">): ComponentDTO[] {
-  return s.formulations.flatMap((f) => f.components);
+  return s.formulations.flatMap((f) => [...f.components, ...(f.veinRoyBody?.components ?? [])]);
 }
 
 /** Consumption of the selected material(s) in one sample. */
@@ -95,7 +96,8 @@ export function consumptionOf(s: Pick<SampleDetail, "formulations">, kind: Mater
 export function componentText(c: ComponentDTO): string {
   const name = c.material?.label ?? "—";
   const size = c.size ? ` (${c.size.label})` : "";
-  const qty = c.quantity === null ? "" : ` ${Number(c.quantity)}${c.unit === "PERCENT" ? " %" : c.unit === "GRAMS" ? " gm" : ""}`;
+  // Grams by default; a value recorded in % before that option was removed keeps its "%".
+  const qty = c.quantity === null ? "" : ` ${Number(c.quantity)}${c.unit === "PERCENT" ? " %" : " gm"}`;
   return `${name}${size}${qty}`;
 }
 

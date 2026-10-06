@@ -30,16 +30,6 @@ export function FormulationFields({ name, idPrefix }: { name: FormulationPath; i
   );
 }
 
-export function UnitSelect({ id, value, onChange, invalid }: { id: string; value: string; onChange: (v: string) => void; invalid?: boolean }) {
-  return (
-    <select id={id} className={cn("input", invalid && "input-error")} value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">—</option>
-      <option value="GRAMS">grams (gm)</option>
-      <option value="PERCENT">percentage (%)</option>
-    </select>
-  );
-}
-
 function MaterialRows({
   name,
   idPrefix,
@@ -58,6 +48,7 @@ function MaterialRows({
   const { control, register, formState } = useFormContext<FieldValues>();
   const { options, allowCustom } = useSampleFormEnv();
   const { fields, append, remove } = useFieldArray({ control, name: `${name}.${kind}` });
+  const rows = (useWatch({ control, name: `${name}.${kind}` }) ?? []) as ComponentRowInput[];
   const noun = title.toLowerCase().replace(/s$/, "");
 
   return (
@@ -75,7 +66,7 @@ function MaterialRows({
               key={f.id}
               className={cn(
                 "grid grid-cols-1 gap-3 rounded-lg sm:grid-cols-2",
-                withSize ? "lg:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)_auto]" : "lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto]",
+                withSize ? "lg:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1fr)_auto]" : "lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto]",
                 fields.length > 1 && "border border-line p-3 lg:border-0 lg:p-0",
               )}
             >
@@ -115,14 +106,7 @@ function MaterialRows({
                   />
                 </Field>
               )}
-              <Field label="Measurement" htmlFor={`${id}-u`}>
-                <Controller
-                  control={control}
-                  name={`${base}.unit`}
-                  render={({ field }) => <UnitSelect id={`${id}-u`} value={field.value ?? ""} onChange={field.onChange} />}
-                />
-              </Field>
-              <Field label="Quantity" htmlFor={`${id}-q`} error={qtyErr}>
+              <Field label={<QtyLabel legacyPercent={rows[i]?.unit === "PERCENT"} />} htmlFor={`${id}-q`} error={qtyErr}>
                 <input
                   id={`${id}-q`}
                   inputMode="decimal"
@@ -201,7 +185,7 @@ function PigmentFields({ name, idPrefix }: { name: FormulationPath; idPrefix: st
         </Field>
 
         <div className="min-w-0">
-          <p className="label">Quantity</p>
+          <p className="label">Quantity (gm)</p>
           {fields.length === 0 ? (
             <div className="flex min-h-11 items-center rounded-lg border border-dashed border-line-2 px-3 text-[13px] text-ink-3">
               Select a colour to enter its quantity
@@ -221,6 +205,7 @@ function PigmentFields({ name, idPrefix }: { name: FormulationPath; idPrefix: st
                         {isNew && <span className="badge shrink-0 bg-warn-bg text-warn-fg">new</span>}
                       </label>
                       <input
+                        title={rows[i]?.unit === "PERCENT" ? "Recorded earlier in %" : undefined}
                         id={`${idPrefix}-pq-${i}`}
                         inputMode="decimal"
                         autoComplete="off"
@@ -242,5 +227,19 @@ function PigmentFields({ name, idPrefix }: { name: FormulationPath; idPrefix: st
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Quantities are entered in grams only. Samples saved before the % option was
+ * removed keep their % value; the label says so instead of mislabelling it.
+ */
+function QtyLabel({ legacyPercent }: { legacyPercent?: boolean }) {
+  return legacyPercent ? (
+    <>
+      Quantity <span className="badge ml-1 bg-warn-bg text-warn-fg">recorded in %</span>
+    </>
+  ) : (
+    <>Quantity (gm)</>
   );
 }

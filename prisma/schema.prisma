@@ -105,14 +105,16 @@ model MasterValue {
   createdBy User?          @relation("MasterValueCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
   // Reverse relations — they are what makes a value "in use".
-  samplesAsType        LabSample[]            @relation("SampleType")
-  samplesAsMixer       LabSample[]            @relation("SampleMixerType")
-  componentsAsMaterial FormulationComponent[] @relation("ComponentMaterial")
-  componentsAsSize     FormulationComponent[] @relation("ComponentSize")
+  samplesAsType        LabSample[]             @relation("SampleType")
+  samplesAsMixer       LabSample[]             @relation("SampleMixerType")
+  componentsAsMaterial FormulationComponent[]  @relation("ComponentMaterial")
+  componentsAsSize     FormulationComponent[]  @relation("ComponentSize")
   designPatternUses    SampleDesignPattern[]
   veinMethodUses       SampleVeinMethod[]
   inwardCompanyUses    InwardOutwardEntry[]
   inwardPatternUses    InwardDesignPattern[]
+  formulationsAsMixer  Formulation[]           @relation("FormulationMixerType")
+  formulationVeinUses  FormulationVeinMethod[]
 
   @@unique([categoryId, normalizedKey])
   @@unique([categoryId, code])
@@ -148,6 +150,8 @@ model LabSample {
   sampleDate            DateTime        @db.Date
   status                SampleStatus    @default(SUBMITTED)
   sampleTypeId          String?
+  /// Free-text design name (e.g. "Calacatta Gold").
+  designName            String?
   numberOfBodies        Int?
   designCategory        DesignCategory?
   mixerTypeId           String?
@@ -192,24 +196,70 @@ enum FormulationRole {
 }
 
 /// Belongs to exactly one owner: a lab sample OR an inward/outward entry
-/// (enforced in the service layer). New owners add one nullable FK here.
+/// (enforced in the service layer) — or, for the Roy Body opened from a Roy
+/// Body's own Vein, to its parent formulation. New owners add one nullable FK.
+///
+/// A Roy Body (role DESIGN_ROY_BODY) is a complete body of its own: besides
+/// its components it carries Number of Bodies, Vein details (with Mixer Type)
+/// and L/a/b readings.
 model Formulation {
   id            String          @id @default(cuid())
   sampleId      String?
   inwardEntryId String?
+  parentId      String?
   role          FormulationRole
   /// Reserved for per-body formulations (Body 1, Body 2 …). 1 today.
   bodyIndex     Int             @default(1)
   notes         String?
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
 
-  sample      LabSample?             @relation(fields: [sampleId], references: [id], onDelete: Cascade)
-  inwardEntry InwardOutwardEntry?    @relation(fields: [inwardEntryId], references: [id], onDelete: Cascade)
-  components  FormulationComponent[]
+  // Roy Body details (unused for plain formulations)
+  numberOfBodies Int?
+  hasVein        Boolean?
+  veinNotes      String?
+  mixerTypeId    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sample       LabSample?               @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+  inwardEntry  InwardOutwardEntry?      @relation(fields: [inwardEntryId], references: [id], onDelete: Cascade)
+  parent       Formulation?             @relation("NestedFormulation", fields: [parentId], references: [id], onDelete: Cascade)
+  children     Formulation[]            @relation("NestedFormulation")
+  mixerType    MasterValue?             @relation("FormulationMixerType", fields: [mixerTypeId], references: [id], onDelete: Restrict)
+  components   FormulationComponent[]
+  veinMethods  FormulationVeinMethod[]
+  measurements FormulationMeasurement[]
 
   @@unique([sampleId, role, bodyIndex])
   @@unique([inwardEntryId, role, bodyIndex])
+  @@index([parentId])
+}
+
+model FormulationVeinMethod {
+  formulationId String
+  methodId      String
+  sortOrder     Int    @default(0)
+
+  formulation Formulation @relation(fields: [formulationId], references: [id], onDelete: Cascade)
+  method      MasterValue @relation(fields: [methodId], references: [id], onDelete: Restrict)
+
+  @@id([formulationId, methodId])
+  @@index([methodId])
+}
+
+/// L / a / b of a Roy Body — same stage × body structure as the sample's.
+model FormulationMeasurement {
+  id            String           @id @default(cuid())
+  formulationId String
+  stage         MeasurementStage
+  bodyIndex     Int
+  l             Decimal?         @db.Decimal(8, 3)
+  a             Decimal?         @db.Decimal(8, 3)
+  b             Decimal?         @db.Decimal(8, 3)
+
+  formulation Formulation @relation(fields: [formulationId], references: [id], onDelete: Cascade)
+
+  @@unique([formulationId, stage, bodyIndex])
 }
 
 enum ComponentKind {

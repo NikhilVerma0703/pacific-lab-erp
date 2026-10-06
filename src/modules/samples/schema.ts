@@ -63,7 +63,7 @@ export const componentRowSchema = z
     material: masterRefSchema.nullable(),
     size: masterRefSchema.nullable().optional(),
     unit: unitSchema,
-    quantity: optionalNumber({ min: 0, max: 1_000_000, label: "Quantity" }),
+    quantity: optionalNumber({ min: 0, max: 1_000_000, label: "Quantity (gm)" }),
   })
   .superRefine((row, ctx) => {
     if (row.unit === "PERCENT" && row.quantity !== null && row.quantity > 100) {
@@ -86,6 +86,37 @@ export const labRowSchema = z.object({
   b: optionalNumber({ min: -128, max: 128, label: "b" }),
 });
 
+// ── Roy Body (opened from Design) — a complete body of its own ──────────────
+
+const yesNo = z
+  .enum(["", "YES", "NO"])
+  .optional()
+  .transform((v) => (!v ? null : v === "YES"));
+
+/**
+ * The Roy Body opened from Design: its own Number of Bodies, the formulation
+ * (Resin / Grits / Filler / Pigments), a Vein block like the sample's (with
+ * Mixer Type and, when ROY BODY is picked there, a nested formulation) and
+ * Post Press / Post Polish L/a/b per body. Extra parts are optional so older
+ * saved Roy Bodies still load.
+ */
+export const royBodySchema = formulationSchema
+  .extend({
+    numberOfBodies: optionalNumber({ min: 1, max: MAX_BODIES, int: true, label: "Number of Bodies" }),
+    hasVein: yesNo,
+    mixerType: masterRefSchema.nullable().optional().transform((v) => v ?? null),
+    veinMethods: z.array(masterRefSchema).max(30).optional().transform((v) => v ?? []),
+    veinNotes: optionalText(1000),
+    veinRoyBody: formulationSchema.optional().transform((v) => v ?? { resins: [], grits: [], fillers: [], pigments: [] }),
+    postPress: z.array(labRowSchema).max(MAX_BODIES).optional().transform((v) => v ?? []),
+    postPolish: z.array(labRowSchema).max(MAX_BODIES).optional().transform((v) => v ?? []),
+  })
+  .superRefine((v, ctx) => {
+    if (v.numberOfBodies !== null && (v.postPress.length > v.numberOfBodies || v.postPolish.length > v.numberOfBodies)) {
+      ctx.addIssue({ code: "custom", path: ["numberOfBodies"], message: "More L/a/b rows than bodies." });
+    }
+  });
+
 // ── the sample ───────────────────────────────────────────────────────────────
 
 export const sampleFormSchema = z
@@ -104,6 +135,7 @@ export const sampleFormSchema = z
         return s;
       }),
     sampleType: masterRefSchema.nullable(),
+    designName: optionalText(200),
     /** Inspired samples only. */
     physicalSamplePresent: z
       .enum(["", "YES", "NO"])
@@ -115,7 +147,7 @@ export const sampleFormSchema = z
       .enum(["", "PLAIN_BODY", "NON_PLAIN_BODY"])
       .transform((v) => (v === "" ? null : v)),
     designPatterns: z.array(masterRefSchema).max(30),
-    designRoyBody: formulationSchema,
+    designRoyBody: royBodySchema,
     mixerType: masterRefSchema.nullable(),
     hasVein: z.enum(["", "YES", "NO"]).transform((v) => (v === "" ? null : v === "YES")),
     veinMethods: z.array(masterRefSchema).max(30),
@@ -154,6 +186,8 @@ export type SampleFormData = z.output<typeof sampleFormSchema>;
 export type FormulationInput = z.input<typeof formulationSchema>;
 export type FormulationData = z.output<typeof formulationSchema>;
 export type ComponentRowInput = z.input<typeof componentRowSchema>;
+export type RoyBodyInput = z.input<typeof royBodySchema>;
+export type RoyBodyData = z.output<typeof royBodySchema>;
 export type LabRowInput = z.input<typeof labRowSchema>;
 
 export const emptyComponentRow = (): ComponentRowInput => ({ material: null, size: null, unit: "", quantity: "" });
@@ -167,6 +201,18 @@ export const emptyFormulation = (): FormulationInput => ({
 
 export const emptyLabRow = (): LabRowInput => ({ l: "", a: "", b: "" });
 
+export const emptyRoyBody = (): RoyBodyInput => ({
+  ...emptyFormulation(),
+  numberOfBodies: "",
+  hasVein: "",
+  mixerType: null,
+  veinMethods: [],
+  veinNotes: "",
+  veinRoyBody: emptyFormulation(),
+  postPress: [],
+  postPolish: [],
+});
+
 /** A blank sample form with the suggested numbers and today's date. */
 export function newSampleInput(args: { serialNo: number; slabNumber: number; today: string }): SampleFormInput {
   return {
@@ -174,12 +220,13 @@ export function newSampleInput(args: { serialNo: number; slabNumber: number; tod
     slabNumber: String(args.slabNumber),
     sampleDate: args.today,
     sampleType: null,
+    designName: "",
     physicalSamplePresent: "",
     numberOfBodies: "",
     main: emptyFormulation(),
     designCategory: "",
     designPatterns: [],
-    designRoyBody: emptyFormulation(),
+    designRoyBody: emptyRoyBody(),
     mixerType: null,
     hasVein: "",
     veinMethods: [],

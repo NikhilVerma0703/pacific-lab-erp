@@ -145,6 +145,8 @@ export async function listValues(categoryCode: string) {
           veinMethodUses: true,
           inwardCompanyUses: true,
           inwardPatternUses: true,
+          formulationsAsMixer: true,
+          formulationVeinUses: true,
         },
       },
     },
@@ -171,7 +173,9 @@ export async function listValues(categoryCode: string) {
           c.designPatternUses +
           c.veinMethodUses +
           c.inwardCompanyUses +
-          c.inwardPatternUses,
+          c.inwardPatternUses +
+          c.formulationsAsMixer +
+          c.formulationVeinUses,
       };
     }),
   };

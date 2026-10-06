@@ -3,15 +3,17 @@
 import { formatNumber } from "@/lib/utils";
 import type { ComponentDTO, FormulationDTO } from "@/modules/samples/queries";
 
-const UNIT: Record<string, string> = { GRAMS: "gm", PERCENT: "%" };
+/** "1200" for grams; "30 %" only for values recorded before % was removed. */
+function qty(c: ComponentDTO): string {
+  if (c.quantity === null) return "—";
+  return c.unit === "PERCENT" ? `${formatNumber(c.quantity)} %` : formatNumber(c.quantity);
+}
 
-/** Read-only Resin / Grits / Filler / Pigment tables for any formulation. */
-export function FormulationView({ f }: { f?: FormulationDTO }) {
+/** Read-only Resin / Grits / Filler / Pigment tables for any formulation. All quantities in grams. */
+export function FormulationView({ f }: { f?: Pick<FormulationDTO, "components"> | null }) {
   if (!f || f.components.length === 0) return <p className="text-sm text-ink-3">Not recorded.</p>;
   const rows = (k: ComponentDTO["kind"]) => f.components.filter((c) => c.kind === k);
   const pigments = rows("PIGMENT");
-  // Pigments have no unit field any more; older samples may still carry one.
-  const pigmentUnits = pigments.some((c) => c.unit);
   const material = (title: string, list: ComponentDTO[], withSize = false) =>
     list.length === 0 ? null : (
       <div>
@@ -22,8 +24,7 @@ export function FormulationView({ f }: { f?: FormulationDTO }) {
               <tr>
                 <th className="th">{title}</th>
                 {withSize && <th className="th">Size of Grits</th>}
-                <th className="th">Measurement</th>
-                <th className="th">Quantity</th>
+                <th className="th">Quantity (gm)</th>
               </tr>
             </thead>
             <tbody>
@@ -31,10 +32,7 @@ export function FormulationView({ f }: { f?: FormulationDTO }) {
                 <tr key={i}>
                   <td className="td font-semibold">{c.material?.label ?? "—"}</td>
                   {withSize && <td className="td">{c.size?.label ?? "—"}</td>}
-                  <td className="td">{c.unit === "GRAMS" ? "grams (gm)" : c.unit === "PERCENT" ? "percentage (%)" : "—"}</td>
-                  <td className="td tabular-nums">
-                    {c.quantity !== null ? `${formatNumber(c.quantity)} ${c.unit ? UNIT[c.unit] : ""}` : "—"}
-                  </td>
+                  <td className="td tabular-nums">{qty(c)}</td>
                 </tr>
               ))}
             </tbody>
@@ -57,18 +55,14 @@ export function FormulationView({ f }: { f?: FormulationDTO }) {
               <thead>
                 <tr>
                   <th className="th">Color</th>
-                  <th className="th">Quantity</th>
-                  {pigmentUnits && <th className="th">Unit</th>}
+                  <th className="th">Quantity (gm)</th>
                 </tr>
               </thead>
               <tbody>
                 {pigments.map((c, i) => (
                   <tr key={i}>
                     <td className="td font-semibold">{c.material?.label ?? "—"}</td>
-                    <td className="td tabular-nums">{formatNumber(c.quantity)}</td>
-                    {pigmentUnits && (
-                      <td className="td">{c.unit === "GRAMS" ? "grams (gm)" : c.unit === "PERCENT" ? "percentage (%)" : "—"}</td>
-                    )}
+                    <td className="td tabular-nums">{qty(c)}</td>
                   </tr>
                 ))}
               </tbody>
