@@ -9,11 +9,13 @@ import { requireUser } from "@/lib/session";
 import { formatDate } from "@/lib/utils";
 import { MASTER } from "@/modules/master-data/catalog";
 import { FilterForm } from "@/modules/downloads/components/FilterForm";
+import { ProductionDownload } from "@/modules/downloads/components/ProductionDownload";
 import { SampleDownload } from "@/modules/downloads/components/SampleDownload";
-import { inwardDesignsFor, samplesOn } from "@/modules/downloads/data";
-import { applyFilters, filtersToQuery, MATERIAL_KIND_LABEL, parseFilters, type MaterialKind } from "@/modules/downloads/filters";
+import { inwardDesignsFor, productionIn, samplesIn } from "@/modules/downloads/data";
+import { applyFilters, filtersToQuery, parseFilters, wantsLab, wantsProduction } from "@/modules/downloads/filters";
 import { filterLabels } from "@/modules/downloads/labels";
-import { formatGrams } from "@/modules/reports/components/format";
+import { periodLabel } from "@/modules/downloads/period";
+import { unionLabels } from "@/modules/samples/bodies";
 
 export const metadata = { title: "Downloads" };
 export const dynamic = "force-dynamic";
@@ -28,59 +30,71 @@ export default async function DownloadsPage({ searchParams }: { searchParams: Pr
   const applied = q.apply === "1";
   const filters = parseFilters(q, today);
 
-  const lists = await prisma.masterValue.findMany({
-    where: { category: { code: { in: [MASTER.DESIGN_PATTERN, MASTER.RESIN, MASTER.GRIT, MASTER.FILLER, MASTER.PIGMENT] } } },
-    select: { id: true, label: true, isActive: true, category: { select: { code: true } } },
+  const canProduction = can(user, "production.view");
+  // Production Samples only for users who may see them.
+  if (!canProduction && filters.sampleType === "PRODUCTION") filters.sampleType = "";
+
+  const patternValues = await prisma.masterValue.findMany({
+    where: { category: { code: MASTER.DESIGN_PATTERN } },
+    select: { id: true, label: true, isActive: true },
     orderBy: [{ isActive: "desc" }, { sortOrder: "asc" }, { label: "asc" }],
   });
-  const opts = (code: string) =>
-    lists.filter((v) => v.category.code === code).map((v) => ({ id: v.id, label: v.isActive ? v.label : `${v.label} (disabled)` }));
-  const materials: Record<MaterialKind, { id: string; label: string }[]> = {
-    RESIN: opts(MASTER.RESIN),
-    GRIT: opts(MASTER.GRIT),
-    FILLER: opts(MASTER.FILLER),
-    PIGMENT: opts(MASTER.PIGMENT),
-  };
+  const patterns = patternValues.map((v) => ({ id: v.id, label: v.isActive ? v.label : `${v.label} (disabled)` }));
 
   let results: ReturnType<typeof applyFilters> | null = null;
   let labels: Record<string, string> = {};
   if (applied) {
-    const samples = await samplesOn(filters.date);
-    results = applyFilters(samples, await inwardDesignsFor(samples), filters);
+    const [samples, productions] = await Promise.all([
+      wantsLab(filters) ? samplesIn(filters.period) : [],
+      wantsProduction(filters) && canProduction ? productionIn(filters.period) : [],
+    ]);
+    results = applyFilters(samples, await inwardDesignsFor(samples), productions, filters);
     labels = await filterLabels(filters);
   }
-  const mk = filters.materialKind;
-  const total = results?.reduce((a, r) => a + (r.consumption?.grams ?? 0), 0) ?? 0;
-  const chips = [
-    labels.sampleType,
-    labels.design,
-    labels.pattern && `Pattern: ${labels.pattern}`,
-    mk && `${MATERIAL_KIND_LABEL[mk]}${labels.material ? `: ${labels.material}` : " (all)"}`,
-  ].filter(Boolean) as string[];
+  const chips = [labels.sampleType, labels.design, labels.pattern && `Pattern: ${labels.pattern}`].filter(Boolean) as string[];
+  const designText = (d: { categories: string[] }) =>
+    d.categories.map((c) => (c === "PLAIN_BODY" ? "Plain Body" : "Non-Plain Body")).join(", ") || "—";
+  const href = (r: NonNullable<typeof results>[number]) => (r.source === "lab" ? `/samples/${r.id}` : `/production-sample/${r.id}`);
+  const draft = (r: NonNullable<typeof results>[number]) => r.source === "lab" && r.sample.status === "DRAFT";
+  const mixer = (r: NonNullable<typeof results>[number]) =>
+    r.source === "lab" ? unionLabels(r.sample.bodies.map((b) => (b.mixerType ? [b.mixerType] : []))).join(", ") || "—" : "—";
 
   return (
     <>
-      <PageHeader title="Downloads" description="Download lab records as Excel (.xlsx) — by date, or filtered." />
+      <PageHeader title="Downloads" description="Download lab records as Excel (.xlsx) — by Production Date, or filtered." />
 
       {/* 1 · Sample Data Download */}
       <section className="card mb-8" aria-labelledby="dl-h">
         <div className="border-b border-line px-4 py-3 sm:px-5">
           <h2 id="dl-h" className="text-[15px] font-bold">1 · Sample Data Download</h2>
-          <p className="text-[13px] text-ink-2">Pick a date and what to download.</p>
+          <p className="text-[13px] text-ink-2">Pick the Production Date and what to download.</p>
         </div>
         <div className="px-4 py-4 sm:px-5">
           <SampleDownload today={today} />
         </div>
       </section>
 
-      {/* 2 · Filtered Data Export */}
+      {/* 2 · Production Sample Data Download */}
+      {can(user, "production.view") && (
+        <section className="card mb-8" aria-labelledby="pdl-h">
+          <div className="border-b border-line px-4 py-3 sm:px-5">
+            <h2 id="pdl-h" className="text-[15px] font-bold">2 · Production Sample Data Download</h2>
+            <p className="text-[13px] text-ink-2">Pick the Production Date to download its production samples.</p>
+          </div>
+          <div className="px-4 py-4 sm:px-5">
+            <ProductionDownload today={today} />
+          </div>
+        </section>
+      )}
+
+      {/* 3 · Filtered Data Export */}
       <section id="filtered" className="card scroll-mt-20" aria-labelledby="fx-h">
         <div className="border-b border-line px-4 py-3 sm:px-5">
-          <h2 id="fx-h" className="text-[15px] font-bold">2 · Filtered Data Export</h2>
-          <p className="text-[13px] text-ink-2">Choose a date and filters, Apply to see the matching samples, then export exactly those.</p>
+          <h2 id="fx-h" className="text-[15px] font-bold">3 · Filtered Data Export</h2>
+          <p className="text-[13px] text-ink-2">Choose the Production Date and filters, Apply to see the matching samples, then export exactly those.</p>
         </div>
         <div className="px-4 py-4 sm:px-5">
-          <FilterForm key={filtersToQuery(filters)} today={today} initial={filters} patterns={opts(MASTER.DESIGN_PATTERN)} materials={materials} />
+          <FilterForm key={filtersToQuery(filters)} today={today} initial={filters} patterns={patterns} showProduction={canProduction} />
         </div>
 
         {results && (
@@ -88,7 +102,7 @@ export default async function DownloadsPage({ searchParams }: { searchParams: Pr
             <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:px-5">
               <div className="min-w-0 flex-1">
                 <p className="text-[15px] font-bold">
-                  {results.length} sample{results.length === 1 ? "" : "s"} on {formatDate(filters.date)}
+                  {results.length} sample{results.length === 1 ? "" : "s"} · {periodLabel(filters.period)}
                 </p>
                 <div className="mt-1 flex flex-wrap gap-1.5">
                   {chips.length ? (
@@ -98,18 +112,10 @@ export default async function DownloadsPage({ searchParams }: { searchParams: Pr
                       </span>
                     ))
                   ) : (
-                    <span className="text-[13px] text-ink-3">No filters — every sample of the date.</span>
+                    <span className="text-[13px] text-ink-3">No filters — every sample of the Production Date.</span>
                   )}
                 </div>
               </div>
-              {mk && (
-                <div className="rounded-lg bg-accent-bg px-4 py-2">
-                  <p className="text-[11px] font-bold tracking-wide text-accent uppercase">
-                    {labels.material ?? MATERIAL_KIND_LABEL[mk]} consumed
-                  </p>
-                  <p className="text-xl font-bold tabular-nums">{formatGrams(total)}</p>
-                </div>
-              )}
               <a
                 href={`/api/downloads?kind=filtered&${filtersToQuery(filters)}`}
                 className={`btn-primary ${results.length ? "" : "pointer-events-none opacity-50"}`}
@@ -121,7 +127,7 @@ export default async function DownloadsPage({ searchParams }: { searchParams: Pr
             </div>
 
             {results.length === 0 ? (
-              <p className="px-5 pb-8 text-center text-sm text-ink-3">No samples match these filters on this date.</p>
+              <p className="px-5 pb-8 text-center text-sm text-ink-3">No samples match these filters for this Production Date.</p>
             ) : (
               <>
                 <div className="hidden overflow-x-auto md:block">
@@ -129,35 +135,35 @@ export default async function DownloadsPage({ searchParams }: { searchParams: Pr
                     <thead>
                       <tr>
                         <th className="th">S.No.</th>
+                        <th className="th">Date</th>
                         <th className="th">Slab</th>
                         <th className="th">Sample Type</th>
                         <th className="th">Design</th>
                         <th className="th">Design Pattern(s)</th>
                         <th className="th">Mixer</th>
-                        {mk && <th className="th text-right">Consumed</th>}
-                        {mk && <th className="th">{MATERIAL_KIND_LABEL[mk]} used</th>}
                         <th className="th">Details</th>
                       </tr>
                     </thead>
                     <tbody>
                       {results.map((r) => (
-                        <tr key={r.sample.id} className="hover:bg-mute-bg/50">
+                        <tr key={`${r.source}-${r.id}`} className="hover:bg-mute-bg/50">
                           <td className="td font-semibold tabular-nums">
-                            {r.sample.serialNo}
-                            {r.sample.status === "DRAFT" && <span className="badge ml-2 bg-warn-bg text-warn-fg">Draft</span>}
+                            {r.serialNo}
+                            {draft(r) && <span className="badge ml-2 bg-warn-bg text-warn-fg">Draft</span>}
                           </td>
-                          <td className="td tabular-nums">{r.sample.slabNumber ?? "—"}</td>
-                          <td className="td">{r.sample.sampleType?.label ?? "—"}</td>
+                          <td className="td whitespace-nowrap">{formatDate(r.date)}</td>
+                          <td className="td tabular-nums">{r.slabNumber ?? "—"}</td>
                           <td className="td">
-                            {r.design.designCategory === "PLAIN_BODY" ? "Plain Body" : r.design.designCategory === "NON_PLAIN_BODY" ? "Non-Plain Body" : "—"}
+                            {r.source === "production" ? <span className="badge bg-accent-bg text-accent">{r.typeLabel}</span> : (r.typeLabel ?? "—")}
+                          </td>
+                          <td className="td">
+                            {designText(r.design)}
                             {r.design.source === "inward" && <span className="block text-[11px] text-ink-3">from Inward / Outward</span>}
                           </td>
                           <td className="td">{r.design.patterns.map((p) => p.label).join(", ") || "—"}</td>
-                          <td className="td">{r.sample.mixerType?.label ?? "—"}</td>
-                          {mk && <td className="td text-right font-semibold tabular-nums">{formatGrams(r.consumption?.grams ?? 0)}</td>}
-                          {mk && <td className="td max-w-[260px] text-[13px] text-ink-2">{r.consumption?.detail || "—"}</td>}
+                          <td className="td">{mixer(r)}</td>
                           <td className="td">
-                            <Link href={`/samples/${r.sample.id}`} className="btn-secondary btn-sm whitespace-nowrap">
+                            <Link href={href(r)} className="btn-secondary btn-sm whitespace-nowrap">
                               <FileSearch className="size-3.5" /> View
                             </Link>
                           </td>
@@ -168,21 +174,17 @@ export default async function DownloadsPage({ searchParams }: { searchParams: Pr
                 </div>
                 <ul className="divide-y divide-line md:hidden">
                   {results.map((r) => (
-                    <li key={r.sample.id} className="space-y-1 px-4 py-3 text-[14px]">
+                    <li key={`${r.source}-${r.id}`} className="space-y-1 px-4 py-3 text-[14px]">
                       <p className="font-bold">
-                        S.No. {r.sample.serialNo}
-                        <span className="ml-2 font-normal text-ink-3">Slab {r.sample.slabNumber ?? "—"}</span>
+                        S.No. {r.serialNo}
+                        <span className="ml-2 font-normal text-ink-3">
+                          Slab {r.slabNumber ?? "—"} · {formatDate(r.date)}
+                        </span>
                       </p>
                       <p className="text-ink-2">
-                        {r.sample.sampleType?.label ?? "—"} · {r.design.patterns.map((p) => p.label).join(", ") || (r.design.designCategory === "PLAIN_BODY" ? "Plain Body" : "No design")}
+                        {r.typeLabel ?? "—"} · {r.design.patterns.map((p) => p.label).join(", ") || (r.design.categories.includes("PLAIN_BODY") ? "Plain Body" : "No design")}
                       </p>
-                      {mk && (
-                        <p>
-                          <strong className="tabular-nums">{formatGrams(r.consumption?.grams ?? 0)}</strong>{" "}
-                          <span className="text-[13px] text-ink-2">{r.consumption?.detail}</span>
-                        </p>
-                      )}
-                      <Link href={`/samples/${r.sample.id}`} className="btn-secondary btn-sm mt-1">
+                      <Link href={href(r)} className="btn-secondary btn-sm mt-1">
                         <FileSearch className="size-3.5" /> View
                       </Link>
                     </li>

@@ -9,7 +9,8 @@ import { Controller, FormProvider, useForm, type Resolver } from "react-hook-for
 import { toast } from "sonner";
 import { DesignFields } from "@/components/lab/DesignFields";
 import { errorAt, SampleFormContext } from "@/components/lab/form-context";
-import { LabRowsFields, NoBodiesHint, useBodyRows } from "@/components/lab/LabRowsFields";
+import { useBodyRows } from "@/components/lab/LabRowsFields";
+import { BodyLabFields, BodyPart, BodySections } from "@/components/lab/BodySections";
 import { ConfirmDialog } from "@/components/ui/Dialog";
 import { Field } from "@/components/ui/Field";
 import { FormSection } from "@/components/ui/FormSection";
@@ -19,7 +20,7 @@ import { MASTER } from "@/modules/master-data/catalog";
 import type { MasterOptions } from "@/modules/master-data/types";
 import { MAX_BODIES } from "@/modules/samples/schema";
 import { nextInwardSerialAction, saveInwardAction } from "../actions";
-import { inwardFormSchema, type InwardFormData, type InwardFormInput } from "../schema";
+import { emptyInwardBody, inwardFormSchema, type InwardFormData, type InwardFormInput } from "../schema";
 
 export interface LinkedSample {
   id: string;
@@ -58,7 +59,7 @@ export function InwardForm({
   });
   const { control, register, handleSubmit, getValues, setValue, reset, setError, formState } = methods;
   const errors = formState.errors;
-  const n = useBodyRows(methods, "numberOfBodies", ["measurements"]);
+  const n = useBodyRows(methods, "numberOfBodies", ["bodies"], emptyInwardBody);
   const env = useMemo(() => ({ options, allowCustom: canAddMaster }), [options, canAddMaster]);
 
   useEffect(() => {
@@ -206,21 +207,25 @@ export function InwardForm({
             </div>
           </FormSection>
 
-          <FormSection index={2} title="L, a, b Values">
-            {n < 1 ? (
-              <NoBodiesHint />
-            ) : (
-              <div className="max-w-2xl">
-                <LabRowsFields name="measurements" n={n} />
-              </div>
-            )}
+          {/* Body 1 … n — each body: Design, its L, a, b */}
+          <FormSection index={2} title="Bodies" description={n > 0 ? `${n} bod${n === 1 ? "y" : "ies"} — one section each` : undefined}>
+            <BodySections
+              n={n}
+              idPrefix="io"
+              render={(i) => (
+                <>
+                  <BodyPart title="Design Pattern">
+                    <DesignFields prefix={`bodies.${i}.`} idPrefix={`io${i + 1}`} royTitle={`Roy Body Formulation (Body ${i + 1})`} />
+                  </BodyPart>
+                  <BodyPart title={`L, a, b Values — Body ${i + 1}`}>
+                    <BodyLabFields name={`bodies.${i}`} label={`Body ${i + 1}`} variant="single" />
+                  </BodyPart>
+                </>
+              )}
+            />
           </FormSection>
 
-          <FormSection index={3} title="Design Pattern">
-            <DesignFields idPrefix="io" />
-          </FormSection>
-
-          <FormSection index={4} title="Lab Recreation Attempts">
+          <FormSection index={3} title="Lab Recreation Attempts">
             <Field label="Lab Recreation Attempts" htmlFor="io-attempts" error={errorAt(errors, "recreationAttempts")}>
               <textarea
                 id="io-attempts"

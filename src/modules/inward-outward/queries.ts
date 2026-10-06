@@ -7,11 +7,22 @@ import {
   royBodyToInput,
   toFormulationDTO,
   type FormulationDTO,
+  type LabValueDTO,
   type ValueDTO,
 } from "@/modules/samples/queries";
+import { bodiesDesignText, bodyDesignsOrLegacy } from "@/modules/samples/bodies";
 import { emptyLabRow } from "@/modules/samples/schema";
 import { inwardInclude } from "./service";
 import type { InwardFormInput } from "./schema";
+
+/** Body i of an inward entry: its Design (+ Roy Body) and its L/a/b. */
+export interface InwardBodyDTO {
+  index: number;
+  designCategory: "PLAIN_BODY" | "NON_PLAIN_BODY" | null;
+  designPatterns: ValueDTO[];
+  royBody: FormulationDTO | null;
+  lab: LabValueDTO | null;
+}
 
 export interface InwardDetail {
   id: string;
@@ -21,10 +32,10 @@ export interface InwardDetail {
   company: ValueDTO | null;
   sampleDesignName: string | null;
   numberOfBodies: number | null;
-  designCategory: "PLAIN_BODY" | "NON_PLAIN_BODY" | null;
-  designPatterns: ValueDTO[];
-  measurements: { bodyIndex: number; l: string | null; a: string | null; b: string | null }[];
-  royBody: FormulationDTO | null;
+  /** Body 1 … n. */
+  bodies: InwardBodyDTO[];
+  /** Saved before body-wise entry: one design for the whole entry, shown on every body. */
+  legacyBodies: boolean;
   recreationAttempts: string | null;
   createdBy: string | null;
   updatedBy: string | null;
@@ -34,8 +45,45 @@ export interface InwardDetail {
 
 type EntryWithAll = Prisma.InwardOutwardEntryGetPayload<{ include: typeof inwardInclude }>;
 
+function inwardBodies(e: EntryWithAll): { bodies: InwardBodyDTO[]; legacy: boolean } {
+  const roy = (i: number) => {
+    const f = e.formulations.find((x) => x.role === "DESIGN_ROY_BODY" && x.bodyIndex === i);
+    return f ? toFormulationDTO(f) : null;
+  };
+  const lab = (i: number): LabValueDTO | null => {
+    const m = e.measurements.find((x) => x.bodyIndex === i);
+    return m ? { l: dec(m.l), a: dec(m.a), b: dec(m.b) } : null;
+  };
+  if (e.bodies.length) {
+    const n = Math.max(e.numberOfBodies ?? 0, ...e.bodies.map((b) => b.bodyIndex));
+    const bodies = Array.from({ length: n }, (_, k): InwardBodyDTO => {
+      const b = e.bodies.find((x) => x.bodyIndex === k + 1);
+      return {
+        index: k + 1,
+        designCategory: b?.designCategory ?? null,
+        designPatterns: b?.designPatterns.map((p) => p.pattern) ?? [],
+        royBody: roy(k + 1),
+        lab: lab(k + 1),
+      };
+    });
+    return { bodies, legacy: false };
+  }
+  // Saved before body-wise entry: its one design (and Roy Body) on every body.
+  const hasLegacy = e.designCategory !== null || e.designPatterns.length > 0 || e.formulations.length > 0;
+  const maxLab = Math.max(0, ...e.measurements.map((m) => m.bodyIndex));
+  const n = e.numberOfBodies ?? (hasLegacy || maxLab ? Math.max(1, maxLab) : 0);
+  const bodies = Array.from({ length: n }, (_, k): InwardBodyDTO => ({
+    index: k + 1,
+    designCategory: e.designCategory,
+    designPatterns: e.designPatterns.map((p) => p.pattern),
+    royBody: roy(1),
+    lab: lab(k + 1),
+  }));
+  return { bodies, legacy: hasLegacy && n > 0 };
+}
+
 export function toInwardDetail(e: EntryWithAll): InwardDetail {
-  const roy = e.formulations.find((f) => f.role === "DESIGN_ROY_BODY");
+  const { bodies, legacy } = inwardBodies(e);
   return {
     id: e.id,
     serialNo: e.serialNo,
@@ -46,10 +94,8 @@ export function toInwardDetail(e: EntryWithAll): InwardDetail {
     company: e.company,
     sampleDesignName: e.sampleDesignName,
     numberOfBodies: e.numberOfBodies,
-    designCategory: e.designCategory,
-    designPatterns: e.designPatterns.map((p) => p.pattern),
-    measurements: e.measurements.map((m) => ({ bodyIndex: m.bodyIndex, l: dec(m.l), a: dec(m.a), b: dec(m.b) })),
-    royBody: roy ? toFormulationDTO(roy) : null,
+    bodies,
+    legacyBodies: legacy,
     recreationAttempts: e.recreationAttempts,
     createdBy: e.createdBy?.name ?? null,
     updatedBy: e.updatedBy?.name ?? null,
@@ -66,18 +112,19 @@ export async function getInwardDetail(id: string): Promise<InwardDetail | null> 
 export function inwardReferencedIds(d: InwardDetail): string[] {
   const ids = new Set<string>();
   if (d.company) ids.add(d.company.id);
-  d.designPatterns.forEach((p) => ids.add(p.id));
-  for (const c of [...(d.royBody?.components ?? []), ...(d.royBody?.veinRoyBody?.components ?? [])]) {
-    if (c.material) ids.add(c.material.id);
-    if (c.size) ids.add(c.size.id);
+  for (const b of d.bodies) {
+    b.designPatterns.forEach((p) => ids.add(p.id));
+    for (const c of [...(b.royBody?.components ?? []), ...(b.royBody?.veinRoyBody?.components ?? [])]) {
+      if (c.material) ids.add(c.material.id);
+      if (c.size) ids.add(c.size.id);
+    }
+    if (b.royBody?.mixerType) ids.add(b.royBody.mixerType.id);
+    b.royBody?.veinMethods.forEach((m) => ids.add(m.id));
   }
-  if (d.royBody?.mixerType) ids.add(d.royBody.mixerType.id);
-  d.royBody?.veinMethods.forEach((m) => ids.add(m.id));
   return [...ids];
 }
 
 export function inwardToFormInput(d: InwardDetail): InwardFormInput {
-  const n = d.numberOfBodies ?? 0;
   const s = (v: string | null) => (v === null ? "" : String(Number(v)));
   return {
     entryDate: d.entryDate,
@@ -85,14 +132,13 @@ export function inwardToFormInput(d: InwardDetail): InwardFormInput {
     labSampleId: d.labSample?.id ?? null,
     company: d.company ? { id: d.company.id, label: d.company.label } : null,
     sampleDesignName: d.sampleDesignName ?? "",
-    numberOfBodies: d.numberOfBodies === null ? "" : String(d.numberOfBodies),
-    measurements: Array.from({ length: n }, (_, i) => {
-      const m = d.measurements.find((x) => x.bodyIndex === i + 1);
-      return m ? { l: s(m.l), a: s(m.a), b: s(m.b) } : emptyLabRow();
-    }),
-    designCategory: d.designCategory ?? "",
-    designPatterns: d.designPatterns.map((p) => ({ id: p.id, label: p.label })),
-    designRoyBody: royBodyToInput(d.royBody),
+    numberOfBodies: d.numberOfBodies !== null ? String(d.numberOfBodies) : d.bodies.length ? String(d.bodies.length) : "",
+    bodies: d.bodies.map((b) => ({
+      designCategory: b.designCategory ?? "",
+      designPatterns: b.designPatterns.map((p) => ({ id: p.id, label: p.label })),
+      designRoyBody: royBodyToInput(b.royBody),
+      lab: b.lab ? { l: s(b.lab.l), a: s(b.lab.a), b: s(b.lab.b) } : emptyLabRow(),
+    })),
     recreationAttempts: d.recreationAttempts ?? "",
   };
 }
@@ -119,11 +165,20 @@ export async function getRecentInward(take = 10): Promise<InwardRow[]> {
       serialNo: true,
       entryDate: true,
       sampleDesignName: true,
+      numberOfBodies: true,
       designCategory: true,
       recreationAttempts: true,
       company: { select: { label: true } },
       labSample: { select: { serialNo: true } },
       designPatterns: { select: { pattern: { select: { label: true } } }, orderBy: { sortOrder: "asc" } },
+      bodies: {
+        orderBy: { bodyIndex: "asc" },
+        select: {
+          bodyIndex: true,
+          designCategory: true,
+          designPatterns: { select: { pattern: { select: { label: true } } }, orderBy: { sortOrder: "asc" } },
+        },
+      },
     },
   });
   return rows.map((r) => ({
@@ -133,14 +188,13 @@ export async function getRecentInward(take = 10): Promise<InwardRow[]> {
     labSampleSerial: r.labSample?.serialNo ?? null,
     company: r.company?.label ?? null,
     sampleDesignName: r.sampleDesignName,
-    design:
-      r.designCategory === "PLAIN_BODY"
-        ? "Plain Body"
-        : r.designPatterns.length
-          ? r.designPatterns.map((p) => p.pattern.label).join(", ")
-          : r.designCategory === "NON_PLAIN_BODY"
-            ? "Non-Plain Body"
-            : "",
+    design: bodiesDesignText(
+      bodyDesignsOrLegacy(
+        r.bodies.map((b) => ({ bodyIndex: b.bodyIndex, designCategory: b.designCategory, patterns: b.designPatterns.map((p) => p.pattern) })),
+        { designCategory: r.designCategory, patterns: r.designPatterns.map((p) => p.pattern) },
+        r.numberOfBodies,
+      ),
+    ),
     recreationAttempts: r.recreationAttempts,
   }));
 }

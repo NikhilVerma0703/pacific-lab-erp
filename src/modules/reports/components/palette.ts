@@ -6,6 +6,8 @@
  */
 export const SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"] as const;
 export const OTHER_COLOR = "#9aa3ad";
+/** Production Samples' own colour (validated: ≥ 3:1 on white, distinct from the lab-sample blue). */
+export const PRODUCTION_SAMPLE_COLOR = "#008300";
 export const AXIS = "#7a8896";
 export const GRID = "#e8edf2";
 export const INK = "#16202c";

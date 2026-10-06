@@ -17,6 +17,7 @@ export function AttachmentsField({
   files,
   onChange,
   sampleId,
+  productionSampleId,
   canUpload,
   canRemove,
   maxMb,
@@ -24,6 +25,8 @@ export function AttachmentsField({
   files: AttachmentDTO[];
   onChange: (files: AttachmentDTO[]) => void;
   sampleId?: string;
+  /** Set instead of `sampleId` when the files belong to a production sample. */
+  productionSampleId?: string;
   canUpload: boolean;
   canRemove: boolean;
   maxMb: number;
@@ -40,6 +43,7 @@ export function AttachmentsField({
       const fd = new FormData();
       fd.append("file", file);
       if (sampleId) fd.append("sampleId", sampleId);
+      if (productionSampleId) fd.append("productionSampleId", productionSampleId);
       fd.append("existing", filesRef.current.map((f) => f.id).join(","));
       const xhr = new XMLHttpRequest();
       xhr.open("POST", "/api/uploads");

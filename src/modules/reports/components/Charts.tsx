@@ -18,7 +18,7 @@ import type { ConsumptionData, MaterialKind, ReportData } from "../build";
 import { MATERIAL_KINDS, OTHER } from "../build";
 import { ChartCard, EmptyChart, Legend, TipBox } from "./ChartCard";
 import { countDomain, countTicks, formatGrams, longDate, shortDate } from "./format";
-import { AXIS, GRID, OTHER_COLOR, SERIES } from "./palette";
+import { AXIS, GRID, OTHER_COLOR, PRODUCTION_SAMPLE_COLOR, SERIES } from "./palette";
 
 const axisProps = {
   stroke: AXIS,
@@ -86,6 +86,79 @@ export function ProductionChart({ data }: { data: ReportData }) {
             <tr>
               <td className="td font-bold">Total</td>
               <td className="td text-right font-bold tabular-nums">{data.totals.samples}</td>
+            </tr>
+          </tbody>
+        </table>
+      }
+    />
+  );
+}
+
+// ── Production Samples (received from the plant) ───────────────────────────
+
+export function ProductionSamplesChart({ data }: { data: ReportData }) {
+  const max = Math.max(0, ...data.productionSamples.map((d) => d.count));
+  const domain = countDomain(max);
+  const total = data.totals.productionSamples;
+  const color = PRODUCTION_SAMPLE_COLOR;
+  return (
+    <ChartCard
+      title="Production Samples"
+      description={`Production samples on each date · ${total} in the last ${data.days} days`}
+      empty={total === 0 ? <EmptyChart>No production samples dated in this period.</EmptyChart> : undefined}
+      chart={
+        <div className="h-72" role="img" aria-label="Line chart of production samples per date">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={data.productionSamples} margin={{ top: 16, right: 16, bottom: 4, left: -16 }}>
+              <CartesianGrid stroke={GRID} vertical={false} />
+              <XAxis dataKey="date" tickFormatter={shortDate} minTickGap={18} {...axisProps} />
+              <YAxis
+                domain={domain}
+                ticks={countTicks(domain[1])}
+                allowDecimals={false}
+                {...axisProps}
+                label={{ value: "Production Samples", angle: -90, position: "insideLeft", offset: 26, fill: AXIS, fontSize: 12, style: { textAnchor: "middle" } }}
+              />
+              <Tooltip
+                cursor={{ stroke: AXIS, strokeDasharray: "3 3" }}
+                content={({ active, payload, label }) =>
+                  active && payload?.length ? (
+                    <TipBox title={longDate(String(label))} rows={[{ label: "Production samples", value: String(payload[0].value), color }]} />
+                  ) : null
+                }
+              />
+              <Line
+                type="linear"
+                dataKey="count"
+                name="Production samples"
+                stroke={color}
+                strokeWidth={2}
+                dot={{ r: 4, fill: color, stroke: "#fff", strokeWidth: 2 }}
+                activeDot={{ r: 6, stroke: "#fff", strokeWidth: 2 }}
+                isAnimationActive={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      }
+      table={
+        <table className="w-full text-[14px]">
+          <thead>
+            <tr>
+              <th className="th">Date</th>
+              <th className="th text-right">Production samples</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.productionSamples.map((d) => (
+              <tr key={d.date}>
+                <td className="td">{longDate(d.date)}</td>
+                <td className="td text-right tabular-nums">{d.count}</td>
+              </tr>
+            ))}
+            <tr>
+              <td className="td font-bold">Total</td>
+              <td className="td text-right font-bold tabular-nums">{total}</td>
             </tr>
           </tbody>
         </table>

@@ -12,6 +12,7 @@ import {
   CreativeInspiredChart,
   DesignChart,
   ProductionChart,
+  ProductionSamplesChart,
 } from "@/modules/reports/components/Charts";
 
 export const metadata = { title: "Reports" };
@@ -29,6 +30,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     { label: "Creative", value: data.totals.creative },
     { label: "Inspired", value: data.totals.inspired },
     { label: "Days with samples", value: `${activeDays} / ${days}` },
+    { label: "Production samples", value: data.totals.productionSamples },
   ];
 
   return (
@@ -61,7 +63,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         </p>
       </div>
 
-      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {kpis.map((k) => (
           <div key={k.label} className="card px-4 py-3">
             <p className="text-[12px] font-semibold tracking-wide text-ink-3 uppercase">{k.label}</p>
@@ -73,6 +75,9 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       <div className="grid gap-5 xl:grid-cols-2">
         <ProductionChart data={data} />
         <CreativeInspiredChart data={data} />
+        <div className="xl:col-span-2">
+          <ProductionSamplesChart data={data} />
+        </div>
         <div className="xl:col-span-2">
           <DesignChart data={data} />
         </div>

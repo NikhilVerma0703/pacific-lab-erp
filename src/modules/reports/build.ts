@@ -23,8 +23,8 @@ export const OTHER = "Other";
 export interface ReportSampleRow {
   date: string; // YYYY-MM-DD
   typeCode: string | null; // CREATIVE / INSPIRED / null / custom
-  designCategory: "PLAIN_BODY" | "NON_PLAIN_BODY" | null;
-  patterns: string[];
+  /** Design names across the sample's bodies: "Plain Body", patterns, or "Non-Plain (no pattern)" — each once. */
+  designs: string[];
   components: { kind: MaterialKind; material: string | null; unit: "GRAMS" | "PERCENT" | null; quantity: number | null }[];
 }
 
@@ -48,8 +48,10 @@ export interface ReportData {
   from: string;
   to: string;
   dates: string[];
-  totals: { samples: number; creative: number; inspired: number; otherType: number; withoutDesign: number };
+  totals: { samples: number; creative: number; inspired: number; otherType: number; withoutDesign: number; productionSamples: number };
   production: { date: string; count: number }[];
+  /** Production Samples (received from the plant) per date, from their Date field. */
+  productionSamples: { date: string; count: number }[];
   creativeVsInspired: { date: string; creative: number; inspired: number }[];
   designs: { pattern: string; count: number }[];
   consumption: Record<MaterialKind, ConsumptionData>;
@@ -72,10 +74,17 @@ export function parseRange(raw: string | undefined): ReportRange {
 
 const round = (n: number) => Math.round(n * 1000) / 1000;
 
-export function buildReport(rows: ReportSampleRow[], today: string, days: ReportRange): ReportData {
+/**
+ * @param productionDates the Date (YYYY-MM-DD) of every Production Sample —
+ *   one entry per sample; dates outside the window are ignored.
+ */
+export function buildReport(rows: ReportSampleRow[], today: string, days: ReportRange, productionDates: string[] = []): ReportData {
   const dates = dateWindow(today, days);
   const inRange = new Set(dates);
   const samples = rows.filter((r) => inRange.has(r.date));
+  const productionPerDate = new Map(dates.map((d) => [d, 0]));
+  for (const d of productionDates) if (productionPerDate.has(d)) productionPerDate.set(d, productionPerDate.get(d)! + 1);
+  const productionSamples = dates.map((date) => ({ date, count: productionPerDate.get(date)! }));
 
   const perDate = new Map(dates.map((d) => [d, { count: 0, creative: 0, inspired: 0 }]));
   const designCounts = new Map<string, number>();
@@ -94,15 +103,8 @@ export function buildReport(rows: ReportSampleRow[], today: string, days: Report
       inspired++;
     }
 
-    // Each sample counts once per design pattern it carries.
-    const designs =
-      s.designCategory === "PLAIN_BODY"
-        ? ["Plain Body"]
-        : [...new Set(s.patterns)].length
-          ? [...new Set(s.patterns)]
-          : s.designCategory === "NON_PLAIN_BODY"
-            ? ["Non-Plain (no pattern)"]
-            : [];
+    // Each sample counts once per design pattern it carries (on any body).
+    const designs = [...new Set(s.designs)];
     if (!designs.length) withoutDesign++;
     for (const d of designs) designCounts.set(d, (designCounts.get(d) ?? 0) + 1);
   }
@@ -168,8 +170,10 @@ export function buildReport(rows: ReportSampleRow[], today: string, days: Report
       inspired,
       otherType: samples.length - creative - inspired,
       withoutDesign,
+      productionSamples: productionSamples.reduce((a, d) => a + d.count, 0),
     },
     production: dates.map((date) => ({ date, count: perDate.get(date)!.count })),
+    productionSamples,
     creativeVsInspired: dates.map((date) => ({
       date,
       creative: perDate.get(date)!.creative,

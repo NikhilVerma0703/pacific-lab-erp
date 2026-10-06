@@ -1,11 +1,12 @@
 "use client";
 
-import { CalendarDays, Filter, RotateCcw } from "lucide-react";
+import { Filter, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { Field } from "@/components/ui/Field";
-import type { ExportFilters, MaterialKind } from "../filters";
-import { MATERIAL_KIND_LABEL } from "../filters";
+import { SAMPLE_TYPE_OPTIONS, type ExportFilters } from "../filters";
+import { periodProblem, type Period } from "../period";
+import { ProductionDateFields } from "./ProductionDateFields";
 
 interface Opt {
   id: string;
@@ -20,36 +21,53 @@ export function FilterForm({
   today,
   initial,
   patterns,
-  materials,
+  showProduction,
 }: {
   today: string;
   initial: ExportFilters;
   patterns: Opt[];
-  materials: Record<MaterialKind, Opt[]>;
+  /** Offer "Production Samples" (users who may view them). */
+  showProduction: boolean;
 }) {
   const [design, setDesign] = useState(initial.design);
-  const [mkind, setMkind] = useState(initial.materialKind);
+  const [period, setPeriod] = useState<Period>(initial.period);
+  const [tried, setTried] = useState(false);
+  const problem = periodProblem(period);
 
   return (
-    <form method="get" action="/downloads#filtered" className="space-y-4">
+    <form
+      method="get"
+      action="/downloads#filtered"
+      className="space-y-4"
+      noValidate
+      onSubmit={(e) => {
+        if (problem) {
+          e.preventDefault();
+          setTried(true);
+        }
+      }}
+    >
       <input type="hidden" name="apply" value="1" />
-      {/* Row 1: the date every filter and result is for. */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        <Field label="Date" htmlFor="f-date">
-          <div className="relative">
-            <CalendarDays className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-3" />
-            <input id="f-date" name="date" type="date" required className="input pl-9" defaultValue={initial.date} max={today} />
-          </div>
-        </Field>
+      {/* Row 1: the Production Date every filter and result is for. */}
+      <div className="flex flex-wrap items-end gap-4">
+        <ProductionDateFields idPrefix="f" value={period} onChange={setPeriod} today={today} named error={tried ? problem : null} />
       </div>
+      {tried && problem && (
+        <p className="-mt-2 text-[13px] text-bad-fg" role="alert">
+          {problem}
+        </p>
+      )}
 
       {/* Rows below: any combination of filters — every one chosen must match. */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Field label="Sample Type" htmlFor="f-type">
           <select id="f-type" name="type" className="input" defaultValue={initial.sampleType}>
             <option value="">All sample types</option>
-            <option value="CREATIVE">Creative Sample</option>
-            <option value="INSPIRED">Inspired Sample</option>
+            {SAMPLE_TYPE_OPTIONS.filter((o) => showProduction || o.value !== "PRODUCTION").map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
           </select>
         </Field>
         <Field label="Design" htmlFor="f-design">
@@ -67,34 +85,6 @@ export function FilterForm({
                 {p.label}
               </option>
             ))}
-          </select>
-        </Field>
-        <Field label="Material Consumption" htmlFor="f-mkind">
-          <select id="f-mkind" name="mkind" className="input" value={mkind} onChange={(e) => setMkind(e.target.value as typeof mkind)}>
-            <option value="">No material filter</option>
-            {(Object.keys(MATERIAL_KIND_LABEL) as MaterialKind[]).map((k) => (
-              <option key={k} value={k}>
-                {MATERIAL_KIND_LABEL[k]}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Material" htmlFor="f-material">
-          <select
-            key={mkind}
-            id="f-material"
-            name="material"
-            className="input"
-            defaultValue={mkind === initial.materialKind ? initial.material : ""}
-            disabled={!mkind}
-          >
-            <option value="">{mkind ? `All ${MATERIAL_KIND_LABEL[mkind].toLowerCase()}` : "—"}</option>
-            {mkind &&
-              materials[mkind].map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
           </select>
         </Field>
       </div>

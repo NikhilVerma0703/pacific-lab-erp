@@ -2,7 +2,7 @@
 
 Laboratory / R&D sub-ERP: lab samples, their formulations, design, vein, L/a/b readings and output files, with the master lists that feed every dropdown.
 
-**Live sections:** Dashboard, Sample Data Entry, Sample Inward / Outward (with Rectification), Reports, Downloads and Master Data. Production Sample appears in the sidebar as *Soon* and is built in a later phase.
+**Live sections:** Dashboard (with the Forum), Sample Data Entry, Sample Inward / Outward (with Rectification), Production Sample, Reports, Downloads and Master Data.
 
 > **Updating an existing install:** after copying new code, run `npm install` and `npm run db:push` (applies new tables/columns), then `npm run db:seed` (adds any new master lists). Existing data is kept.
 
@@ -79,7 +79,7 @@ Tablets on the plant network: `npm run build` then `npm start`, and open `http:/
 
 There is no sign-in or sign-up page for now. Everyone who opens the ERP works as one built-in **Admin** user (`SEED_ADMIN_NAME`, default "Lab Admin"), so every screen and action is available, and saved records show that name as "created by". The user is created automatically on first use.
 
-The role rules are still in place in `src/lib/permissions.ts` (Admin, Manager, Lab Operator, Viewer — e.g. only Managers/Admins delete samples or publish announcements), so they take effect again the moment sign-in returns. To switch sign-in back on, `currentUser()` in `src/lib/session.ts` is the only place to change — every page, action and download reads the user through it.
+The role rules are still in place in `src/lib/permissions.ts` (Admin, Manager, Lab Operator, Viewer — e.g. only Managers/Admins delete samples or start Forum posts, while Lab Operators can reply), so they take effect again the moment sign-in returns. To switch sign-in back on, `currentUser()` in `src/lib/session.ts` is the only place to change — every page, action and download reads the user through it.
 
 > While sign-in is off, anyone who can reach the ERP's address can use it. Keep it on the plant network only.
 

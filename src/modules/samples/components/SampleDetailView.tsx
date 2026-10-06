@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { cn, formatDate, formatDateTime, formatNumber } from "@/lib/utils";
-import type { FormulationDTO, SampleDetail } from "../queries";
+import { cn, formatDate, formatDateTime } from "@/lib/utils";
+import type { SampleDetail } from "../queries";
 import { FormulationView } from "@/components/lab/FormulationView";
 import { RoyBodyView } from "@/components/lab/RoyBodyView";
+import { BodyLabTable, BodyViewCard, BodyViewPart, LegacyBodiesNote } from "@/components/lab/BodyView";
 import { AttachmentCard } from "./AttachmentsField";
 import { FileViewer, type ViewableFile } from "./FileViewer";
 
@@ -14,7 +15,6 @@ import { FileViewer, type ViewableFile } from "./FileViewer";
 export function SampleDetailView({ s }: { s: SampleDetail }) {
   const [viewing, setViewing] = useState<ViewableFile | null>(null);
   const isCreative = s.sampleType?.code === "CREATIVE";
-  const f = (role: FormulationDTO["role"]) => s.formulations.find((x) => x.role === role);
   const hasRoy = (list: { code: string | null }[]) => list.some((v) => v.code === "ROY_BODY");
   let n = 0;
   const idx = () => ++n;
@@ -50,78 +50,54 @@ export function SampleDetailView({ s }: { s: SampleDetail }) {
       </Block>
 
       {isCreative && (
-        <>
-          <Block index={idx()} title="Material Choices & Pigment">
-            <FormulationView f={f("MAIN_BODY")} />
-          </Block>
-
-          <Block index={idx()} title="Design">
-            <Grid>
-              <Item label="Design" value={s.designCategory === "PLAIN_BODY" ? "Plain Body" : s.designCategory === "NON_PLAIN_BODY" ? "Non-Plain Body" : null} />
-              {s.designCategory === "NON_PLAIN_BODY" && (
-                <Item label="Design Pattern(s)" value={s.designPatterns.map((p) => p.label).join(", ")} wide />
-              )}
-            </Grid>
-            {hasRoy(s.designPatterns) && (
-              <Nested title="Roy Body Formulation — Design">
-                <RoyBodyView f={f("DESIGN_ROY_BODY")} />
-              </Nested>
-            )}
-          </Block>
-
-          <Block index={idx()} title="Vein">
-            <Grid>
-              <Item label="Vein" value={s.hasVein === null ? null : s.hasVein ? "Yes" : "No"} />
-              <Item label="Mixer Type" value={s.mixerType?.label} />
-              <Item label="How Vein Introduced" value={s.veinMethods.map((m) => m.label).join(", ")} wide />
-              <Item label="Vein details" value={s.veinNotes} wide />
-            </Grid>
-            {hasRoy(s.veinMethods) && (
-              <Nested title="Roy Body Formulation — Vein">
-                <FormulationView f={f("VEIN_ROY_BODY")} />
-              </Nested>
-            )}
-          </Block>
-
-          <Block index={idx()} title="L, a, b Measurements">
-            {!s.numberOfBodies ? (
-              <Empty />
-            ) : (
-              <div className="grid gap-6 lg:grid-cols-2 lg:gap-0">
-                {(["POST_PRESS", "POST_POLISH"] as const).map((stage) => (
-                  <div key={stage} className={cn(stage === "POST_POLISH" ? "lg:border-l-2 lg:border-line-2 lg:pl-6" : "lg:pr-6")}>
-                    <h4 className="mb-2 text-[13px] font-bold tracking-wide text-brand uppercase">
-                      {stage === "POST_PRESS" ? "Post Press" : "Post Polish"}
-                    </h4>
-                    <table className="w-full text-[14px]">
-                      <thead>
-                        <tr>
-                          <th className="th">Body</th>
-                          <th className="th">L</th>
-                          <th className="th normal-case">a</th>
-                          <th className="th normal-case">b</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {Array.from({ length: s.numberOfBodies! }, (_, i) => {
-                          const m = s.measurements.find((x) => x.stage === stage && x.bodyIndex === i + 1);
-                          return (
-                            <tr key={i}>
-                              <td className="td font-semibold">Body {i + 1}</td>
-                              <td className="td tabular-nums">{formatNumber(m?.l)}</td>
-                              <td className="td tabular-nums">{formatNumber(m?.a)}</td>
-                              <td className="td tabular-nums">{formatNumber(m?.b)}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Block>
-        </>
+        <Block index={idx()} title="Bodies">
+          {s.bodies.length === 0 ? (
+            <Empty text="Number of Bodies not recorded." />
+          ) : (
+            <div className="space-y-4">
+              {s.legacyBodies && <LegacyBodiesNote />}
+              {s.bodies.map((b) => (
+                <BodyViewCard key={b.index} index={b.index}>
+                  <BodyViewPart title="Material Choices & Pigments">
+                    <FormulationView f={b.main} />
+                  </BodyViewPart>
+                  <BodyViewPart title="Design">
+                    <Grid>
+                      <Item label="Design" value={b.designCategory === "PLAIN_BODY" ? "Plain Body" : b.designCategory === "NON_PLAIN_BODY" ? "Non-Plain Body" : null} />
+                      {b.designCategory === "NON_PLAIN_BODY" && <Item label="Design Pattern(s)" value={b.designPatterns.map((p) => p.label).join(", ")} wide />}
+                    </Grid>
+                    {b.designCategory === "NON_PLAIN_BODY" && hasRoy(b.designPatterns) && (
+                      <Nested title={`Roy Body Formulation — Design (Body ${b.index})`}>
+                        <RoyBodyView f={b.designRoyBody} />
+                      </Nested>
+                    )}
+                  </BodyViewPart>
+                  <BodyViewPart title="Vein">
+                    <Grid>
+                      <Item label="Vein" value={b.hasVein === null ? null : b.hasVein ? "Yes" : "No"} />
+                      <Item label="Mixer Type" value={b.mixerType?.label} />
+                      {b.hasVein !== false && <Item label="How Vein Introduced" value={b.veinMethods.map((m) => m.label).join(", ")} wide />}
+                      {b.hasVein !== false && <Item label="Vein details" value={b.veinNotes} wide />}
+                    </Grid>
+                    {b.hasVein !== false && hasRoy(b.veinMethods) && (
+                      <Nested title={`Roy Body Formulation — Vein (Body ${b.index})`}>
+                        <FormulationView f={b.veinRoyBody} />
+                      </Nested>
+                    )}
+                  </BodyViewPart>
+                  <BodyViewPart title={`L, a, b Measurements — Body ${b.index}`}>
+                    <BodyLabTable
+                      rows={[
+                        { title: "Post Press", value: b.postPress },
+                        { title: "Post Polish", value: b.postPolish, dot: "accent" },
+                      ]}
+                    />
+                  </BodyViewPart>
+                </BodyViewCard>
+              ))}
+            </div>
+          )}
+        </Block>
       )}
 
       <Block index={idx()} title="Sample Output">

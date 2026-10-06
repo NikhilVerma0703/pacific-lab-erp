@@ -22,7 +22,7 @@ export function OverallKpis({ data }: { data: DashboardData["overall"] }) {
     { label: "Total Designs Worked On", value: data.designs, icon: <Microscope className="size-4" />, href: "/reports?range=30" },
     { label: "Total Companies", value: data.companies, icon: <Building2 className="size-4" />, href: "/master-data?list=COMPANY" },
     { label: "Total Rectification Cases", value: data.rectification, icon: <AlertTriangle className="size-4" />, href: "/inward-outward#rectification" },
-    { label: "Total Production Samples", value: data.production, icon: <Factory className="size-4" />, note: "Section coming soon" },
+    { label: "Total Production Samples", value: data.production, icon: <Factory className="size-4" />, href: "/production-sample#register" },
   ];
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3">

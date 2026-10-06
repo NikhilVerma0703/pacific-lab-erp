@@ -94,7 +94,9 @@ export async function saveInward(args: {
           companyId: await resolve(MASTER.COMPANY, data.company),
           sampleDesignName: data.sampleDesignName,
           numberOfBodies: data.numberOfBodies,
-          designCategory: data.designCategory,
+          // Design now lives on each body (InwardBody); the entry-level column
+          // only remains for entries saved before bodies existed.
+          designCategory: null,
           recreationAttempts: data.recreationAttempts,
           updatedById: user.id,
         };
@@ -107,30 +109,34 @@ export async function saveInward(args: {
           await tx.formulation.deleteMany({ where: { inwardEntryId: entry.id } });
           await tx.inwardDesignPattern.deleteMany({ where: { entryId: entry.id } });
           await tx.inwardMeasurement.deleteMany({ where: { entryId: entry.id } });
+          await tx.inwardBody.deleteMany({ where: { entryId: entry.id } });
         }
 
-        if (data.designCategory === "NON_PLAIN_BODY") {
-          const patternIds: string[] = [];
-          for (const ref of data.designPatterns) {
-            const pid = await resolve(MASTER.DESIGN_PATTERN, ref);
-            if (pid && !patternIds.includes(pid)) patternIds.push(pid);
-          }
-          if (patternIds.length) {
-            await tx.inwardDesignPattern.createMany({
-              data: patternIds.map((patternId, i) => ({ entryId: entry.id, patternId, sortOrder: i })),
-            });
-          }
-          if ((await codesOf(tx, patternIds)).has(VALUE_CODE.ROY_BODY)) {
-            await writeRoyBody(tx, { inwardEntryId: entry.id }, "DESIGN_ROY_BODY", data.designRoyBody, resolve);
-          }
-        }
-
+        // Body 1 … n — each body's Design (+ Roy Body) and L/a/b.
         const n = data.numberOfBodies ?? 0;
-        const rows = data.measurements
-          .slice(0, n)
-          .map((r, i) => ({ entryId: entry.id, bodyIndex: i + 1, l: r.l, a: r.a, b: r.b }))
-          .filter((r) => r.l !== null || r.a !== null || r.b !== null);
-        if (rows.length) await tx.inwardMeasurement.createMany({ data: rows });
+        const labRows: Prisma.InwardMeasurementCreateManyInput[] = [];
+        for (const [k, body] of data.bodies.slice(0, n).entries()) {
+          const bodyIndex = k + 1;
+          const row = await tx.inwardBody.create({ data: { entryId: entry.id, bodyIndex, designCategory: body.designCategory } });
+          if (body.designCategory === "NON_PLAIN_BODY") {
+            const patternIds: string[] = [];
+            for (const ref of body.designPatterns) {
+              const pid = await resolve(MASTER.DESIGN_PATTERN, ref);
+              if (pid && !patternIds.includes(pid)) patternIds.push(pid);
+            }
+            if (patternIds.length) {
+              await tx.inwardBodyDesignPattern.createMany({
+                data: patternIds.map((patternId, i) => ({ bodyId: row.id, patternId, sortOrder: i })),
+              });
+            }
+            if ((await codesOf(tx, patternIds)).has(VALUE_CODE.ROY_BODY)) {
+              await writeRoyBody(tx, { inwardEntryId: entry.id }, "DESIGN_ROY_BODY", body.designRoyBody, resolve, bodyIndex);
+            }
+          }
+          const r = body.lab;
+          if (r.l !== null || r.a !== null || r.b !== null) labRows.push({ entryId: entry.id, bodyIndex, l: r.l, a: r.a, b: r.b });
+        }
+        if (labRows.length) await tx.inwardMeasurement.createMany({ data: labRows });
 
         // The physical sample is in hand → no longer a Rectification item.
         if (entry.labSampleId) {
@@ -172,6 +178,15 @@ export const inwardInclude = {
   },
   measurements: { orderBy: { bodyIndex: "asc" } },
   formulations: { include: formulationInclude },
+  bodies: {
+    include: {
+      designPatterns: {
+        include: { pattern: { select: { id: true, label: true, code: true, isActive: true } } },
+        orderBy: { sortOrder: "asc" },
+      },
+    },
+    orderBy: { bodyIndex: "asc" },
+  },
 } satisfies Prisma.InwardOutwardEntryInclude;
 
 /** Permanent delete, with the full record kept in the audit log. */

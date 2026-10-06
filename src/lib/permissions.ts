@@ -33,9 +33,21 @@ const PERMISSIONS = {
   "inward.edit": ["ADMIN", "MANAGER", "OPERATOR"],
   "inward.delete": ["ADMIN", "MANAGER"],
   "inward.overrideNumbers": ["ADMIN", "MANAGER"],
-  // Dashboard & announcements (Lab Head / Plant Head / CEO = Manager or Admin)
+  // Production Sample (received from the plant) — same rules as lab samples
+  "production.view": ["ADMIN", "MANAGER", "OPERATOR", "VIEWER"],
+  "production.create": ["ADMIN", "MANAGER", "OPERATOR"],
+  "production.edit": ["ADMIN", "MANAGER", "OPERATOR"],
+  "production.delete": ["ADMIN", "MANAGER"],
+  "production.overrideNumbers": ["ADMIN", "MANAGER"],
+  "production.changeDate": ["ADMIN", "MANAGER", "OPERATOR"],
+  // Dashboard & Forum
   "dashboard.view": ["ADMIN", "MANAGER", "OPERATOR", "VIEWER"],
-  "announcement.publish": ["ADMIN", "MANAGER"],
+  /** Start a Forum post — Lab Head / Plant Head / CEO (Manager or Admin). */
+  "forum.post": ["ADMIN", "MANAGER"],
+  /** Reply in a post's thread — Lab and R&D users too. */
+  "forum.reply": ["ADMIN", "MANAGER", "OPERATOR"],
+  /** Move a post between Open / In Progress / Completed. */
+  "forum.status": ["ADMIN", "MANAGER", "OPERATOR"],
   // Downloads / Excel export
   "downloads.view": ["ADMIN", "MANAGER", "OPERATOR", "VIEWER"],
   // Reports

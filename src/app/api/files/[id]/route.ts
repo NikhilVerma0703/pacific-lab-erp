@@ -8,12 +8,16 @@ import { fileKind } from "@/lib/uploads";
 /** Stream an attachment. ?download=1 forces a download; otherwise inline where the browser can show it. */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await currentUser();
-  if (!user || !can(user, "sample.view")) return new NextResponse("Unauthorized", { status: 401 });
+  if (!user || !(can(user, "sample.view") || can(user, "production.view"))) return new NextResponse("Unauthorized", { status: 401 });
   const { id } = await params;
 
   const att = await prisma.sampleAttachment.findUnique({ where: { id } });
   // Unlinked uploads are visible only to whoever uploaded them.
-  if (!att || (!att.sampleId && att.uploadedById !== user.id)) return new NextResponse("Not found", { status: 404 });
+  if (!att) return new NextResponse("Not found", { status: 404 });
+  const linked = !!att.sampleId || !!att.productionSampleId;
+  if (!linked && att.uploadedById !== user.id) return new NextResponse("Not found", { status: 404 });
+  if (att.sampleId && !can(user, "sample.view")) return new NextResponse("Not found", { status: 404 });
+  if (att.productionSampleId && !can(user, "production.view")) return new NextResponse("Not found", { status: 404 });
 
   const data = await storage().get(att.storageKey);
   if (!data) return new NextResponse("The file is missing from storage.", { status: 410 });

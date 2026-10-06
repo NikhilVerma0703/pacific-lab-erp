@@ -11,16 +11,30 @@ import { errorAt, hasCode, useSampleFormEnv } from "./form-context";
 import { RoyBodyFields } from "./RoyBodyFields";
 
 /**
- * Plain / Non-Plain body, the pattern multi-select, and the complete Roy Body
- * (n, formulation, vein, L/a/b) that opens when ROY BODY is picked. Used by every form that
+ * Plain / Non-Plain body, the pattern multi-select, and the Roy Body form that
+ * opens when ROY BODY is picked (by default the complete Roy Body: n,
+ * formulation, vein, L/a/b; a form can pass a different one via `roy`). Used by every form that
  * records a design; the form must have `designCategory`, `designPatterns`
- * and `designRoyBody` fields.
+ * and `designRoyBody` fields under `prefix` (each body's own, e.g. "bodies.0.").
  */
-export function DesignFields({ idPrefix, royTitle = "Roy Body Formulation — Design" }: { idPrefix: string; royTitle?: string }) {
+export function DesignFields({
+  prefix = "",
+  idPrefix,
+  royTitle = "Roy Body Formulation — Design",
+  roy,
+}: {
+  /** Where the fields live, e.g. "bodies.0." for Body 1. */
+  prefix?: string;
+  idPrefix: string;
+  royTitle?: string;
+  /** What the Roy Body form holds. Defaults to the complete Roy Body (lab sample / inward). */
+  roy?: React.ReactNode;
+}) {
   const { control, formState } = useFormContext<FieldValues>();
   const { options, allowCustom } = useSampleFormEnv();
-  const category = useWatch({ control, name: "designCategory" }) as string;
-  const patterns = (useWatch({ control, name: "designPatterns" }) ?? []) as MasterRef[];
+  const p = (name: string) => `${prefix}${name}`;
+  const category = useWatch({ control, name: p("designCategory") }) as string;
+  const patterns = (useWatch({ control, name: p("designPatterns") }) ?? []) as MasterRef[];
   const showRoy = category === "NON_PLAIN_BODY" && hasCode(patterns, options[MASTER.DESIGN_PATTERN], VALUE_CODE.ROY_BODY);
 
   return (
@@ -28,7 +42,7 @@ export function DesignFields({ idPrefix, royTitle = "Roy Body Formulation — De
       <Field label="Design" htmlFor={`${idPrefix}-designCategory`}>
         <Controller
           control={control}
-          name="designCategory"
+          name={p("designCategory")}
           render={({ field }) => (
             <Segmented
               id={`${idPrefix}-designCategory`}
@@ -45,16 +59,16 @@ export function DesignFields({ idPrefix, royTitle = "Roy Body Formulation — De
       {category === "NON_PLAIN_BODY" && (
         <Field
           label="Design Pattern(s)"
-          htmlFor="designPatterns"
-          error={errorAt(formState.errors, "designPatterns")}
+          htmlFor={`${idPrefix}-designPatterns`}
+          error={errorAt(formState.errors, p("designPatterns"))}
           hint="Pick every pattern / body on the slab."
         >
           <Controller
             control={control}
-            name="designPatterns"
+            name={p("designPatterns")}
             render={({ field }) => (
               <MasterPicker
-                id="designPatterns"
+                id={`${idPrefix}-designPatterns`}
                 multiple
                 options={options[MASTER.DESIGN_PATTERN]}
                 value={field.value ?? []}
@@ -69,7 +83,7 @@ export function DesignFields({ idPrefix, royTitle = "Roy Body Formulation — De
       )}
       {showRoy && (
         <FormSection tone="nested" index="R" title={royTitle} description="Opened because ROY BODY is selected">
-          <RoyBodyFields name="designRoyBody" idPrefix={`${idPrefix}roy`} />
+          {roy ?? <RoyBodyFields name={p("designRoyBody")} idPrefix={`${idPrefix}roy`} />}
         </FormSection>
       )}
     </div>

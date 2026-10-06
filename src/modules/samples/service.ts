@@ -116,8 +116,6 @@ export async function saveSample(args: {
       const isCreative = typeCodes.has(VALUE_CODE.CREATIVE_SAMPLE);
       const isInspired = typeCodes.has(VALUE_CODE.INSPIRED_SAMPLE);
 
-      const mixerTypeId = isCreative ? await resolve(MASTER.MIXER_TYPE, data.mixerType) : null;
-
       const base = {
         serialNo,
         slabNumber,
@@ -126,10 +124,12 @@ export async function saveSample(args: {
         sampleTypeId,
         designName: data.designName,
         numberOfBodies: isCreative ? data.numberOfBodies : null,
-        designCategory: isCreative ? data.designCategory : null,
-        mixerTypeId,
-        hasVein: isCreative ? data.hasVein : null,
-        veinNotes: isCreative && data.hasVein !== false ? data.veinNotes : null,
+        // Design and Vein now live on each body (SampleBody). The sample-level
+        // columns only remain for samples saved before bodies existed.
+        designCategory: null,
+        mixerTypeId: null,
+        hasVein: null,
+        veinNotes: null,
         remarks: data.remarks,
         physicalSamplePresent: isInspired ? data.physicalSamplePresent : null,
         updatedById: user.id,
@@ -144,58 +144,73 @@ export async function saveSample(args: {
         await tx.sampleDesignPattern.deleteMany({ where: { sampleId: sample.id } });
         await tx.sampleVeinMethod.deleteMany({ where: { sampleId: sample.id } });
         await tx.labMeasurement.deleteMany({ where: { sampleId: sample.id } });
+        await tx.sampleBody.deleteMany({ where: { sampleId: sample.id } });
       }
 
       if (isCreative) {
-        await writeFormulation(tx, { sampleId: sample.id }, "MAIN_BODY", data.main, resolve);
-
-        // Design
-        if (data.designCategory === "NON_PLAIN_BODY") {
-          const patternIds: string[] = [];
-          for (const ref of data.designPatterns) {
-            const pid = await resolve(MASTER.DESIGN_PATTERN, ref);
-            if (pid && !patternIds.includes(pid)) patternIds.push(pid);
-          }
-          if (patternIds.length) {
-            await tx.sampleDesignPattern.createMany({
-              data: patternIds.map((patternId, i) => ({ sampleId: sample.id, patternId, sortOrder: i })),
-            });
-          }
-          if ((await codesOf(tx, patternIds)).has(VALUE_CODE.ROY_BODY)) {
-            await writeRoyBody(tx, { sampleId: sample.id }, "DESIGN_ROY_BODY", data.designRoyBody, resolve);
-          }
-        }
-
-        // Vein
-        if (data.hasVein !== false) {
-          const methodIds: string[] = [];
-          for (const ref of data.veinMethods) {
-            const mid = await resolve(MASTER.VEIN_METHOD, ref);
-            if (mid && !methodIds.includes(mid)) methodIds.push(mid);
-          }
-          if (methodIds.length) {
-            await tx.sampleVeinMethod.createMany({
-              data: methodIds.map((methodId, i) => ({ sampleId: sample.id, methodId, sortOrder: i })),
-            });
-          }
-          if ((await codesOf(tx, methodIds)).has(VALUE_CODE.ROY_BODY)) {
-            await writeFormulation(tx, { sampleId: sample.id }, "VEIN_ROY_BODY", data.veinRoyBody, resolve);
-          }
-        }
-
-        // L / a / b — one row per body per stage, only where something was measured.
+        // Body 1 … n — each body on its own: Material Choices, Design, Vein, L/a/b.
         const n = data.numberOfBodies ?? 0;
-        const rows: Prisma.LabMeasurementCreateManyInput[] = [];
-        for (const [stage, list] of [
-          ["POST_PRESS", data.postPress],
-          ["POST_POLISH", data.postPolish],
-        ] as const) {
-          list.slice(0, n).forEach((r, i) => {
-            if (r.l === null && r.a === null && r.b === null) return;
-            rows.push({ sampleId: sample.id, stage, bodyIndex: i + 1, l: r.l, a: r.a, b: r.b });
+        const labRows: Prisma.LabMeasurementCreateManyInput[] = [];
+        for (const [i, body] of data.bodies.slice(0, n).entries()) {
+          const bodyIndex = i + 1;
+          const veinApplies = body.hasVein !== false;
+          const row = await tx.sampleBody.create({
+            data: {
+              sampleId: sample.id,
+              bodyIndex,
+              designCategory: body.designCategory,
+              mixerTypeId: await resolve(MASTER.MIXER_TYPE, body.mixerType),
+              hasVein: body.hasVein,
+              veinNotes: veinApplies ? body.veinNotes : null,
+            },
           });
+
+          await writeFormulation(tx, { sampleId: sample.id }, "MAIN_BODY", body.main, resolve, bodyIndex);
+
+          // Design
+          if (body.designCategory === "NON_PLAIN_BODY") {
+            const patternIds: string[] = [];
+            for (const ref of body.designPatterns) {
+              const pid = await resolve(MASTER.DESIGN_PATTERN, ref);
+              if (pid && !patternIds.includes(pid)) patternIds.push(pid);
+            }
+            if (patternIds.length) {
+              await tx.sampleBodyDesignPattern.createMany({
+                data: patternIds.map((patternId, k) => ({ bodyId: row.id, patternId, sortOrder: k })),
+              });
+            }
+            if ((await codesOf(tx, patternIds)).has(VALUE_CODE.ROY_BODY)) {
+              await writeRoyBody(tx, { sampleId: sample.id }, "DESIGN_ROY_BODY", body.designRoyBody, resolve, bodyIndex);
+            }
+          }
+
+          // Vein
+          if (veinApplies) {
+            const methodIds: string[] = [];
+            for (const ref of body.veinMethods) {
+              const mid = await resolve(MASTER.VEIN_METHOD, ref);
+              if (mid && !methodIds.includes(mid)) methodIds.push(mid);
+            }
+            if (methodIds.length) {
+              await tx.sampleBodyVeinMethod.createMany({
+                data: methodIds.map((methodId, k) => ({ bodyId: row.id, methodId, sortOrder: k })),
+              });
+            }
+            if ((await codesOf(tx, methodIds)).has(VALUE_CODE.ROY_BODY)) {
+              await writeFormulation(tx, { sampleId: sample.id }, "VEIN_ROY_BODY", body.veinRoyBody, resolve, bodyIndex);
+            }
+          }
+
+          // This body's L / a / b — only where something was measured.
+          for (const [stage, r] of [
+            ["POST_PRESS", body.postPress],
+            ["POST_POLISH", body.postPolish],
+          ] as const) {
+            if (r.l === null && r.a === null && r.b === null) continue;
+            labRows.push({ sampleId: sample.id, stage, bodyIndex, l: r.l, a: r.a, b: r.b });
+          }
         }
-        if (rows.length) await tx.labMeasurement.createMany({ data: rows });
+        if (labRows.length) await tx.labMeasurement.createMany({ data: labRows });
       }
 
       // ── attachments ────────────────────────────────────────────────────────
@@ -285,4 +300,18 @@ export const sampleInclude = {
   measurements: { orderBy: [{ stage: "asc" }, { bodyIndex: "asc" }] },
   attachments: { orderBy: { createdAt: "asc" } },
   inwardEntry: { select: { id: true, serialNo: true } },
+  bodies: {
+    include: {
+      mixerType: { select: { id: true, label: true, code: true, isActive: true } },
+      designPatterns: {
+        include: { pattern: { select: { id: true, label: true, code: true, isActive: true } } },
+        orderBy: { sortOrder: "asc" },
+      },
+      veinMethods: {
+        include: { method: { select: { id: true, label: true, code: true, isActive: true } } },
+        orderBy: { sortOrder: "asc" },
+      },
+    },
+    orderBy: { bodyIndex: "asc" },
+  },
 } satisfies Prisma.LabSampleInclude;

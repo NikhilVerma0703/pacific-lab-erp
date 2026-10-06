@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { designsOf, tallyDesigns } from "@/modules/dashboard/designs";
+import { tallyDesigns } from "@/modules/dashboard/designs";
+import { designNamesOf } from "@/modules/samples/bodies";
 import { plantDayBounds } from "@/lib/plant-time";
 
 describe("designs worked on", () => {
@@ -10,14 +11,18 @@ describe("designs worked on", () => {
       { name: "Kreos", count: 1 },
     ]);
   });
-  it("Plain Body is a design; patterns only count for non-plain; inward names are added", () => {
-    expect(designsOf({ designCategory: "PLAIN_BODY", patterns: ["VEIN"] })).toEqual(["Plain Body"]);
-    expect(designsOf({ designCategory: "NON_PLAIN_BODY", patterns: ["VEIN", "ROY BODY"], designName: "Calacatta" })).toEqual([
-      "VEIN",
-      "ROY BODY",
-      "Calacatta",
-    ]);
-    expect(designsOf({ designCategory: null, patterns: [] })).toEqual([]);
+  it("Plain Body is a design; patterns only count for non-plain; every body counts once", () => {
+    const p = (label: string) => ({ label });
+    expect(designNamesOf([{ designCategory: "PLAIN_BODY", patterns: [p("VEIN")] }])).toEqual(["Plain Body"]);
+    expect(
+      designNamesOf([
+        { designCategory: "NON_PLAIN_BODY", patterns: [p("VEIN"), p("ROY BODY")] },
+        { designCategory: "PLAIN_BODY", patterns: [] },
+        { designCategory: "NON_PLAIN_BODY", patterns: [p("VEIN")] },
+      ]),
+    ).toEqual(["VEIN", "ROY BODY", "Plain Body"]);
+    expect(designNamesOf([{ designCategory: null, patterns: [] }])).toEqual([]);
+    expect(designNamesOf([{ designCategory: "NON_PLAIN_BODY", patterns: [] }], "Non-Plain (no pattern)")).toEqual(["Non-Plain (no pattern)"]);
   });
 });
 

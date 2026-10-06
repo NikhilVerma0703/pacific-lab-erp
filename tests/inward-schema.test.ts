@@ -1,32 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { inwardFormSchema, newInwardInput } from "@/modules/inward-outward/schema";
+import { emptyInwardBody, inwardFormSchema, newInwardInput } from "@/modules/inward-outward/schema";
 
 describe("inward / outward form schema", () => {
   it("accepts a blank entry", () => {
     expect(inwardFormSchema.safeParse(newInwardInput({ serialNo: 1, today: "2026-10-05" })).success).toBe(true);
   });
 
-  it("parses one L/a/b row per body", () => {
+  it("keeps a design and one L/a/b reading per body", () => {
+    const body = (lab: { l: string; a: string; b: string }, design: "" | "PLAIN_BODY" = "") => ({ ...emptyInwardBody(), designCategory: design, lab });
     const r = inwardFormSchema.parse({
       ...newInwardInput({ serialNo: 5, today: "2026-10-05" }),
       numberOfBodies: "3",
-      measurements: [
-        { l: "88.2", a: "0.3", b: "4.1" },
-        { l: "70", a: "", b: "" },
-        { l: "", a: "", b: "-2" },
-      ],
+      bodies: [body({ l: "88.2", a: "0.3", b: "4.1" }, "PLAIN_BODY"), body({ l: "70", a: "", b: "" }), body({ l: "", a: "", b: "-2" })],
     });
-    expect(r.measurements).toEqual([
+    expect(r.bodies.map((b) => b.lab)).toEqual([
       { l: 88.2, a: 0.3, b: 4.1 },
       { l: 70, a: null, b: null },
       { l: null, a: null, b: -2 },
     ]);
+    expect(r.bodies.map((b) => b.designCategory)).toEqual(["PLAIN_BODY", null, null]);
   });
 
-  it("rejects more L/a/b rows than bodies and bad values", () => {
+  it("rejects more body sections than bodies and bad values", () => {
     const base = newInwardInput({ serialNo: 1, today: "2026-10-05" });
-    expect(inwardFormSchema.safeParse({ ...base, numberOfBodies: "1", measurements: [{ l: "", a: "", b: "" }, { l: "", a: "", b: "" }] }).success).toBe(false);
-    expect(inwardFormSchema.safeParse({ ...base, numberOfBodies: "1", measurements: [{ l: "101", a: "", b: "" }] }).success).toBe(false);
+    expect(inwardFormSchema.safeParse({ ...base, numberOfBodies: "1", bodies: [emptyInwardBody(), emptyInwardBody()] }).success).toBe(false);
+    expect(inwardFormSchema.safeParse({ ...base, numberOfBodies: "1", bodies: [{ ...emptyInwardBody(), lab: { l: "101", a: "", b: "" } }] }).success).toBe(false);
   });
 });
 

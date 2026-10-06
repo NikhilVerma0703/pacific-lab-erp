@@ -76,9 +76,11 @@ export async function writeFormulation(
   role: FormulationRole,
   data: FormulationData,
   resolve: RefResolver,
+  /** Which body (1 … n) of the owner this formulation belongs to. */
+  bodyIndex = 1,
 ): Promise<void> {
   if (!formulationHasData(data)) return;
-  const formulation = await tx.formulation.create({ data: { ...owner, role, bodyIndex: 1 } });
+  const formulation = await tx.formulation.create({ data: { ...owner, role, bodyIndex } });
   await writeComponents(tx, formulation.id, data, resolve);
 }
 
@@ -93,6 +95,8 @@ export async function writeRoyBody(
   role: FormulationRole,
   r: RoyBodyData,
   resolve: RefResolver,
+  /** Which body (1 … n) of the owner opened this Roy Body. */
+  bodyIndex = 1,
 ): Promise<void> {
   if (!royBodyHasData(r)) return;
   const veinApplies = r.hasVein !== false;
@@ -109,7 +113,7 @@ export async function writeRoyBody(
     data: {
       ...owner,
       role,
-      bodyIndex: 1,
+      bodyIndex,
       numberOfBodies: r.numberOfBodies,
       hasVein: r.hasVein,
       veinNotes: veinApplies ? r.veinNotes : null,

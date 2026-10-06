@@ -147,6 +147,12 @@ export async function listValues(categoryCode: string) {
           inwardPatternUses: true,
           formulationsAsMixer: true,
           formulationVeinUses: true,
+          productionPatternUses: true,
+          bodiesAsMixer: true,
+          bodyPatternUses: true,
+          bodyVeinMethodUses: true,
+          inwardBodyPatternUses: true,
+          productionBodyPatternUses: true,
         },
       },
     },
@@ -175,7 +181,13 @@ export async function listValues(categoryCode: string) {
           c.inwardCompanyUses +
           c.inwardPatternUses +
           c.formulationsAsMixer +
-          c.formulationVeinUses,
+          c.formulationVeinUses +
+          c.productionPatternUses +
+          c.bodiesAsMixer +
+          c.bodyPatternUses +
+          c.bodyVeinMethodUses +
+          c.inwardBodyPatternUses +
+          c.productionBodyPatternUses,
       };
     }),
   };

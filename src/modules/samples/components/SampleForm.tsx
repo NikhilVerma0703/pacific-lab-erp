@@ -21,9 +21,9 @@ import { Segmented } from "@/components/ui/Segmented";
 import { nextNumbersAction } from "../next-numbers";
 import { saveSampleAction } from "../actions";
 import type { AttachmentDTO } from "../queries";
-import { MAX_BODIES, sampleFormSchema, type SampleFormData, type SampleFormInput } from "../schema";
+import { emptySampleBody, MAX_BODIES, sampleFormSchema, type SampleFormData, type SampleFormInput } from "../schema";
 import { AttachmentsField } from "./AttachmentsField";
-import { LabMeasurementsFields } from "./LabMeasurementsFields";
+import { BodyLabFields, BodyPart, BodySections } from "@/components/lab/BodySections";
 import { VeinFields } from "@/components/lab/VeinFields";
 
 export interface SampleFormPermissions {
@@ -68,8 +68,8 @@ export function SampleForm({ mode, sampleId, defaults, attachments: initialFiles
   const isCreative = hasCode([sampleType], options[MASTER.SAMPLE_TYPE], VALUE_CODE.CREATIVE_SAMPLE);
   const isInspired = hasCode([sampleType], options[MASTER.SAMPLE_TYPE], VALUE_CODE.INSPIRED_SAMPLE);
 
-  // One L/a/b row per body on each side, preserving what was typed.
-  const n = useBodyRows(methods, "numberOfBodies", ["postPress", "postPolish"]);
+  // One complete Body section per body, preserving what was typed.
+  const n = useBodyRows(methods, "numberOfBodies", ["bodies"], emptySampleBody);
 
   // Warn before leaving with unsaved changes.
   const dirty = formState.isDirty || files.map((f) => f.id).join() !== initialFiles.map((f) => f.id).join();
@@ -292,27 +292,38 @@ export function SampleForm({ mode, sampleId, defaults, attachments: initialFiles
           </FormSection>
 
           {isCreative && (
-            <>
-              {/* 2 · Material choices (+ 3 · Pigment, inside the reusable formulation block) */}
-              <FormSection index={next()} title="Material Choices & Pigment" description="Resin, grits, filler and colours of the main body">
-                <FormulationFields name="main" idPrefix="main" />
-              </FormSection>
-
-              {/* Design */}
-              <FormSection index={next()} title="Design">
-                <DesignFields idPrefix="d" />
-              </FormSection>
-
-              {/* Vein */}
-              <FormSection index={next()} title="Vein">
-                <VeinFields royIdPrefix="vroy" royTitle="Roy Body Formulation — Vein" />
-              </FormSection>
-
-              {/* L a b */}
-              <FormSection index={next()} title="L, a, b Measurements">
-                <LabMeasurementsFields n={n} />
-              </FormSection>
-            </>
+            /* Body 1 … n — each body: Material Choices & Pigments, Design, Vein, its L, a, b */
+            <FormSection index={next()} title="Bodies" description={n > 0 ? `${n} bod${n === 1 ? "y" : "ies"} — one section each` : undefined}>
+              <BodySections
+                n={n}
+                idPrefix="s"
+                render={(i) => {
+                  const b = `bodies.${i}`;
+                  const tag = `b${i + 1}`;
+                  return (
+                    <>
+                      <BodyPart title="Material Choices & Pigments">
+                        <FormulationFields name={`${b}.main`} idPrefix={`${tag}-main`} />
+                      </BodyPart>
+                      <BodyPart title="Design">
+                        <DesignFields prefix={`${b}.`} idPrefix={`${tag}-d`} royTitle={`Roy Body Formulation — Design (Body ${i + 1})`} />
+                      </BodyPart>
+                      <BodyPart title="Vein">
+                        <VeinFields
+                          prefix={`${b}.`}
+                          idPrefix={`${tag}-`}
+                          royIdPrefix={`${tag}-vroy`}
+                          royTitle={`Roy Body Formulation — Vein (Body ${i + 1})`}
+                        />
+                      </BodyPart>
+                      <BodyPart title={`L, a, b Measurements — Body ${i + 1}`}>
+                        <BodyLabFields name={b} label={`Body ${i + 1}`} />
+                      </BodyPart>
+                    </>
+                  );
+                }}
+              />
+            </FormSection>
           )}
 
           {/* Output */}

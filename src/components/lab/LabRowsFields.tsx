@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useFormContext, useWatch, type FieldValues, type UseFormReturn } from "react-hook-form";
 import { cn } from "@/lib/utils";
 import { emptyLabRow, MAX_BODIES } from "@/modules/samples/schema";
@@ -12,21 +12,31 @@ export function bodyCount(raw: unknown): number {
 }
 
 /**
- * Keep the L/a/b arrays at `paths` sized to Number of Bodies, preserving typed
- * values when n grows or shrinks. Takes the form object because it runs in the
- * component that creates the form, outside its FormProvider.
+ * Keep the arrays at `paths` sized to Number of Bodies, preserving what was
+ * typed when n grows or shrinks. New entries come from `make` (an empty L/a/b
+ * row by default, or an empty Body section). Takes the form object because it
+ * runs in the component that creates the form, outside its FormProvider.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function useBodyRows(form: UseFormReturn<any, any, any>, countPath: string, paths: string[]) {
+export function useBodyRows(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  form: UseFormReturn<any, any, any>,
+  countPath: string,
+  paths: string[],
+  make: () => unknown = emptyLabRow,
+) {
   const { control, getValues, setValue } = form as UseFormReturn<FieldValues>;
   const raw = useWatch({ control, name: countPath });
   const key = paths.join("|");
+  const makeRef = useRef(make);
+  makeRef.current = make;
   useEffect(() => {
     const n = bodyCount(raw);
     for (const p of key.split("|")) {
       const cur = (getValues(p) ?? []) as unknown[];
       if (cur.length === n) continue;
-      setValue(p, Array.from({ length: n }, (_, i) => cur[i] ?? emptyLabRow()), { shouldDirty: false });
+      if (cur.length > n) setValue(p, cur.slice(0, n), { shouldDirty: false });
+      // Growing: add only the new entries, leaving what is already typed untouched.
+      else for (let i = cur.length; i < n; i++) setValue(`${p}.${i}`, makeRef.current(), { shouldDirty: false });
     }
   }, [raw, key, getValues, setValue]);
   return bodyCount(raw);
@@ -94,10 +104,14 @@ export function LabRowsFields({
   );
 }
 
-export function NoBodiesHint() {
+export function NoBodiesHint({ children }: { children?: React.ReactNode }) {
   return (
     <p className="rounded-lg bg-info-bg px-4 py-3 text-sm text-info-fg">
-      Enter <strong>Number of Bodies</strong> — one L / a / b row per body will appear here.
+      {children ?? (
+        <>
+          Enter <strong>Number of Bodies</strong> — one L / a / b row per body will appear here.
+        </>
+      )}
     </p>
   );
 }

@@ -11,8 +11,9 @@ import { ALLOWED_UPLOADS, extOf, maxUploadBytes, mimeFromName, sniffMatches } fr
  * as an unlinked attachment; saving the sample links it. Unlinked uploads are
  * removed by the cleanup job.
  *
- * FormData: file, sampleId? (when editing), existing? (ids already on the form,
- * comma-separated — for duplicate detection before the sample is saved)
+ * FormData: file, sampleId? / productionSampleId? (when editing), existing? (ids
+ * already on the form, comma-separated — for duplicate detection before the
+ * sample is saved)
  */
 export async function POST(req: Request) {
   const user = await currentUser();
@@ -58,6 +59,7 @@ export async function POST(req: Request) {
 
   // Duplicate check: same bytes already on this sample / this form.
   const sampleId = (form.get("sampleId") as string | null) || null;
+  const productionSampleId = (form.get("productionSampleId") as string | null) || null;
   const existingIds = String(form.get("existing") ?? "")
     .split(",")
     .map((s) => s.trim())
@@ -65,11 +67,15 @@ export async function POST(req: Request) {
   const dup = await prisma.sampleAttachment.findFirst({
     where: {
       sha256,
-      OR: [...(sampleId ? [{ sampleId }] : []), ...(existingIds.length ? [{ id: { in: existingIds } }] : [])],
+      OR: [
+        ...(sampleId ? [{ sampleId }] : []),
+        ...(productionSampleId ? [{ productionSampleId }] : []),
+        ...(existingIds.length ? [{ id: { in: existingIds } }] : []),
+      ],
     },
     select: { originalName: true },
   });
-  if (dup && (sampleId || existingIds.length)) {
+  if (dup && (sampleId || productionSampleId || existingIds.length)) {
     return NextResponse.json(
       { error: `This file is already attached${dup.originalName !== name ? ` as “${dup.originalName}”` : ""}.` },
       { status: 409 },

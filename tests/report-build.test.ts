@@ -4,8 +4,7 @@ import { buildReport, dateWindow, parseRange, type ReportSampleRow } from "@/mod
 const s = (over: Partial<ReportSampleRow>): ReportSampleRow => ({
   date: "2026-10-05",
   typeCode: "CREATIVE",
-  designCategory: null,
-  patterns: [],
+  designs: [],
   components: [],
   ...over,
 });
@@ -25,14 +24,14 @@ describe("report window", () => {
 
 describe("buildReport", () => {
   const rows = [
-    s({ date: "2026-10-05", designCategory: "NON_PLAIN_BODY", patterns: ["CARRARA", "ROY BODY"],
+    s({ date: "2026-10-05", designs: ["CARRARA", "ROY BODY"],
         components: [
           { kind: "RESIN", material: "INEOS", unit: "GRAMS", quantity: 1200 },
           { kind: "RESIN", material: "ABC", unit: "PERCENT", quantity: 30 },
           { kind: "PIGMENT", material: "White", unit: "GRAMS", quantity: 12 },
         ] }),
-    s({ date: "2026-10-05", typeCode: "INSPIRED", designCategory: "PLAIN_BODY" }),
-    s({ date: "2026-10-03", designCategory: "NON_PLAIN_BODY", patterns: ["CARRARA"],
+    s({ date: "2026-10-05", typeCode: "INSPIRED", designs: ["Plain Body"] }),
+    s({ date: "2026-10-03", designs: ["CARRARA"],
         components: [{ kind: "RESIN", material: "INEOS", unit: "GRAMS", quantity: 300 }] }),
     s({ date: "2026-09-01", components: [{ kind: "RESIN", material: "INEOS", unit: "GRAMS", quantity: 9999 }] }), // outside
   ];
@@ -75,5 +74,17 @@ describe("buildReport", () => {
     expect(p.series).toHaveLength(6);
     expect(p.series[5]).toBe("Other");
     expect(p.byDate.at(-1)!.Other).toBe(10 + 11 + 12); // 5 named + Other: C0..C2 folded
+  });
+});
+
+describe("production samples per date", () => {
+  it("counts each production sample on its date, zero-filled across the window", () => {
+    const r = buildReport([], "2026-10-05", 7, ["2026-10-05", "2026-10-05", "2026-10-02", "2026-09-01"]);
+    expect(r.productionSamples).toHaveLength(7);
+    expect(r.productionSamples.find((d) => d.date === "2026-10-05")?.count).toBe(2);
+    expect(r.productionSamples.find((d) => d.date === "2026-10-02")?.count).toBe(1);
+    expect(r.productionSamples.find((d) => d.date === "2026-10-04")?.count).toBe(0);
+    expect(r.totals.productionSamples).toBe(3); // 2026-09-01 is outside the 7 days
+    expect(buildReport([], "2026-10-05", 30, ["2026-09-10"]).totals.productionSamples).toBe(1);
   });
 });

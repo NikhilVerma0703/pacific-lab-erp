@@ -1,98 +1,84 @@
 /**
  * Filtered export — the filter model and the matching logic. Pure (no
  * database), shared by the page, the Excel route and the unit tests.
+ *
+ * Sample Type covers lab samples (Creative / Inspired) and Production
+ * Samples; "All sample types" includes both.
  */
 import type { ComponentDTO, SampleDetail } from "@/modules/samples/queries";
+import type { ProductionDetail } from "@/modules/production/queries";
+import { inPeriod, parsePeriod, periodQuery, type Period } from "./period";
+import { categoriesOf, unionValues, type DesignCategoryValue } from "@/modules/samples/bodies";
 
-export type MaterialKind = "RESIN" | "GRIT" | "FILLER" | "PIGMENT";
+export type SampleTypeFilter = "" | "CREATIVE" | "INSPIRED" | "PRODUCTION";
+
+export const SAMPLE_TYPE_OPTIONS: { value: Exclude<SampleTypeFilter, "">; label: string }[] = [
+  { value: "CREATIVE", label: "Creative Sample" },
+  { value: "INSPIRED", label: "Inspired Sample" },
+  { value: "PRODUCTION", label: "Production Samples" },
+];
 
 export interface ExportFilters {
-  date: string; // YYYY-MM-DD
-  sampleType: "" | "CREATIVE" | "INSPIRED";
+  /** Production Date: All / Date Wise / Date Range. */
+  period: Period;
+  sampleType: SampleTypeFilter;
   design: "" | "PLAIN_BODY" | "NON_PLAIN_BODY";
   /** Design pattern master-value id. */
   pattern: string;
-  /** Material category for the consumption filter. */
-  materialKind: "" | MaterialKind;
-  /** Specific material (master-value id) within the category. */
-  material: string;
 }
 
-export const MATERIAL_KIND_LABEL: Record<MaterialKind, string> = {
-  RESIN: "Resin",
-  GRIT: "Grits",
-  FILLER: "Filler",
-  PIGMENT: "Pigment",
-};
-
-const isDate = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s));
+/** Do these filters ask for lab samples / production samples at all? */
+export const wantsLab = (f: Pick<ExportFilters, "sampleType">) => f.sampleType !== "PRODUCTION";
+export const wantsProduction = (f: Pick<ExportFilters, "sampleType">) => f.sampleType === "" || f.sampleType === "PRODUCTION";
 
 /** Read filters from a URL query; anything invalid falls back to "any". */
 export function parseFilters(q: Record<string, string | string[] | undefined>, today: string): ExportFilters {
   const one = (k: string) => (Array.isArray(q[k]) ? q[k]![0] : (q[k] as string | undefined)) ?? "";
   const pick = <T extends string>(v: string, allowed: readonly T[]): T | "" => ((allowed as readonly string[]).includes(v) ? (v as T) : "");
   return {
-    date: isDate(one("date")) ? one("date") : today,
-    sampleType: pick(one("type"), ["CREATIVE", "INSPIRED"] as const),
+    period: parsePeriod(q, today),
+    sampleType: pick(one("type"), ["CREATIVE", "INSPIRED", "PRODUCTION"] as const),
     design: pick(one("design"), ["PLAIN_BODY", "NON_PLAIN_BODY"] as const),
     pattern: one("pattern").slice(0, 40),
-    materialKind: pick(one("mkind"), ["RESIN", "GRIT", "FILLER", "PIGMENT"] as const),
-    material: one("material").slice(0, 40),
   };
 }
 
 export function filtersToQuery(f: ExportFilters): string {
-  const p = new URLSearchParams({ date: f.date });
+  const p = new URLSearchParams(periodQuery(f.period));
   if (f.sampleType) p.set("type", f.sampleType);
   if (f.design) p.set("design", f.design);
   if (f.pattern) p.set("pattern", f.pattern);
-  if (f.materialKind) p.set("mkind", f.materialKind);
-  if (f.material) p.set("material", f.material);
   return p.toString();
 }
 
 export interface DesignInfo {
-  designCategory: "PLAIN_BODY" | "NON_PLAIN_BODY" | null;
+  /** Plain and/or Non-Plain — across the record's bodies. */
+  categories: DesignCategoryValue[];
+  /** Every pattern of every body. */
   patterns: { id: string; label: string }[];
   /** Where the design came from — Inspired samples carry it on their Inward entry. */
-  source: "sample" | "inward" | null;
+  source: "sample" | "inward" | "production" | null;
 }
 
-/** A sample's design: its own, or (Inspired) the one on its Inward / Outward entry. */
-export function effectiveDesign(
-  s: Pick<SampleDetail, "designCategory" | "designPatterns">,
-  inward?: { designCategory: DesignInfo["designCategory"]; designPatterns: { id: string; label: string }[] } | null,
-): DesignInfo {
-  if (s.designCategory) return { designCategory: s.designCategory, patterns: s.designPatterns, source: "sample" };
-  if (inward?.designCategory) return { designCategory: inward.designCategory, patterns: inward.designPatterns, source: "inward" };
-  return { designCategory: null, patterns: [], source: null };
+/** A design summarised across bodies, for the filters. */
+export type BodiesDesign = Pick<DesignInfo, "categories" | "patterns">;
+
+export function designAcross(bodies: { designCategory: DesignCategoryValue | null; designPatterns: { id: string; label: string }[] }[]): BodiesDesign {
+  return {
+    categories: categoriesOf(bodies.map((b) => ({ designCategory: b.designCategory, patterns: b.designPatterns }))),
+    patterns: unionValues(bodies.map((b) => b.designPatterns)),
+  };
 }
 
-export interface Consumption {
-  grams: number;
-  percentEntries: number;
-  /** "INEOS 1200 gm; ABC 30 %" for the matching components. */
-  detail: string;
+/** A sample's design across its bodies, or (Inspired) the one on its Inward / Outward entry. */
+export function effectiveDesign(s: Pick<SampleDetail, "bodies">, inward?: BodiesDesign | null): DesignInfo {
+  const own = designAcross(s.bodies);
+  if (own.categories.length) return { ...own, source: "sample" };
+  if (inward?.categories.length) return { ...inward, source: "inward" };
+  return { categories: [], patterns: [], source: null };
 }
 
-/** Every component of a sample — main body, Roy Bodies, and a Roy Body's own vein Roy Body. */
-export function allComponents(s: Pick<SampleDetail, "formulations">): ComponentDTO[] {
-  return s.formulations.flatMap((f) => [...f.components, ...(f.veinRoyBody?.components ?? [])]);
-}
-
-/** Consumption of the selected material(s) in one sample. */
-export function consumptionOf(s: Pick<SampleDetail, "formulations">, kind: MaterialKind, materialId?: string): Consumption {
-  const comps = allComponents(s).filter((c) => c.kind === kind && (!materialId || c.material?.id === materialId));
-  let grams = 0;
-  let percentEntries = 0;
-  for (const c of comps) {
-    if (c.quantity === null) continue;
-    if (c.unit === "PERCENT") percentEntries++;
-    else grams += Number(c.quantity);
-  }
-  return { grams: Math.round(grams * 1000) / 1000, percentEntries, detail: comps.map(componentText).join("; ") };
-}
-
+/** "INEOS (Coarse) 1200 gm" — one formulation component as text. */
 export function componentText(c: ComponentDTO): string {
   const name = c.material?.label ?? "—";
   const size = c.size ? ` (${c.size.label})` : "";
@@ -101,32 +87,71 @@ export function componentText(c: ComponentDTO): string {
   return `${name}${size}${qty}`;
 }
 
-export interface FilteredRow {
-  sample: SampleDetail;
+/** One matching record — a lab sample or a production sample — with what the list and the Excel show. */
+export type FilteredRow = {
+  id: string;
+  serialNo: number;
+  slabNumber: number | null;
+  date: string;
+  typeLabel: string | null;
+  /** How many bodies the record has. */
+  bodies: number;
   design: DesignInfo;
-  consumption: Consumption | null;
-}
+} & ({ source: "lab"; sample: SampleDetail } | { source: "production"; production: ProductionDetail });
 
-/** Samples of the selected date that pass every chosen filter. */
+/** Records of the selected Production Date that pass every chosen filter: lab samples first, then production samples, each by date and number. */
 export function applyFilters(
   samples: SampleDetail[],
-  inwardDesigns: Map<string, { designCategory: DesignInfo["designCategory"]; designPatterns: { id: string; label: string }[] }>,
+  inwardDesigns: Map<string, BodiesDesign>,
+  productions: ProductionDetail[],
   f: ExportFilters,
 ): FilteredRow[] {
-  const out: FilteredRow[] = [];
-  for (const s of samples) {
-    if (s.sampleDate !== f.date) continue;
-    if (f.sampleType && s.sampleType?.code !== f.sampleType) continue;
-    const design = effectiveDesign(s, s.inwardEntry ? inwardDesigns.get(s.inwardEntry.id) : null);
-    if (f.design && design.designCategory !== f.design) continue;
-    if (f.pattern && !(design.designCategory === "NON_PLAIN_BODY" && design.patterns.some((p) => p.id === f.pattern))) continue;
-    let consumption: Consumption | null = null;
-    if (f.materialKind) {
-      const uses = allComponents(s).some((c) => c.kind === f.materialKind && (!f.material || c.material?.id === f.material));
-      if (!uses) continue;
-      consumption = consumptionOf(s, f.materialKind, f.material || undefined);
+  // A record matches when any of its bodies has the chosen design / pattern.
+  const designOk = (d: DesignInfo) =>
+    (!f.design || d.categories.includes(f.design)) && (!f.pattern || d.patterns.some((p) => p.id === f.pattern));
+  const byDateThenNo = (a: FilteredRow, b: FilteredRow) => a.date.localeCompare(b.date) || a.serialNo - b.serialNo;
+
+  const lab: FilteredRow[] = [];
+  if (wantsLab(f)) {
+    for (const s of samples) {
+      if (!inPeriod(s.sampleDate, f.period)) continue;
+      if (f.sampleType && s.sampleType?.code !== f.sampleType) continue;
+      const design = effectiveDesign(s, s.inwardEntry ? inwardDesigns.get(s.inwardEntry.id) : null);
+      if (!designOk(design)) continue;
+      lab.push({
+        source: "lab",
+        sample: s,
+        id: s.id,
+        serialNo: s.serialNo,
+        slabNumber: s.slabNumber,
+        date: s.sampleDate,
+        typeLabel: s.sampleType?.label ?? null,
+        bodies: s.bodies.length,
+        design,
+      });
     }
-    out.push({ sample: s, design, consumption });
   }
-  return out;
+
+  const production: FilteredRow[] = [];
+  if (wantsProduction(f)) {
+    for (const p of productions) {
+      if (!inPeriod(p.sampleDate, f.period)) continue;
+      const across = designAcross(p.bodies);
+      const design: DesignInfo = { ...across, source: across.categories.length ? "production" : null };
+      if (!designOk(design)) continue;
+      production.push({
+        source: "production",
+        production: p,
+        id: p.id,
+        serialNo: p.serialNo,
+        slabNumber: p.slabNumber,
+        date: p.sampleDate,
+        typeLabel: "Production Sample",
+        bodies: p.bodies.length,
+        design,
+      });
+    }
+  }
+
+  return [...lab.sort(byDateThenNo), ...production.sort(byDateThenNo)];
 }

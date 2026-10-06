@@ -1,52 +1,72 @@
 import { describe, expect, it } from "vitest";
-import { applyFilters, consumptionOf, parseFilters, type ExportFilters } from "@/modules/downloads/filters";
+import { applyFilters, parseFilters, type ExportFilters } from "@/modules/downloads/filters";
+import type { ProductionDetail } from "@/modules/production/queries";
 import type { SampleDetail } from "@/modules/samples/queries";
 
 const v = (id: string, label: string, code: string | null = null) => ({ id, label, code, isActive: true });
+type Body = SampleDetail["bodies"][number];
+const body = (index: number, over: Partial<Body> = {}): Body => ({
+  index, main: null, designCategory: null, designPatterns: [], designRoyBody: null, mixerType: null, hasVein: null,
+  veinMethods: [], veinNotes: null, veinRoyBody: null, postPress: null, postPolish: null, ...over,
+});
 const sample = (over: Partial<SampleDetail>): SampleDetail => ({
   id: "s", serialNo: 1, slabNumber: 1, sampleDate: "2026-10-05", status: "SUBMITTED",
   sampleType: v("t1", "Creative Sample", "CREATIVE"), designName: null, physicalSamplePresent: null, inwardEntry: null,
-  numberOfBodies: null, designCategory: null, designPatterns: [], mixerType: null, hasVein: null,
-  veinMethods: [], veinNotes: null, remarks: null, formulations: [], measurements: [], attachments: [],
+  numberOfBodies: null, bodies: [], legacyBodies: false, remarks: null, attachments: [],
   createdBy: null, updatedBy: null, createdAt: "", updatedAt: "", ...over,
 });
-const fm = (role: "MAIN_BODY" | "DESIGN_ROY_BODY", components: SampleDetail["formulations"][number]["components"], veinRoy: SampleDetail["formulations"][number]["components"] = []) => ({
-  role, components, numberOfBodies: null, hasVein: null, veinNotes: null, mixerType: null, veinMethods: [], measurements: [],
-  veinRoyBody: veinRoy.length ? { components: veinRoy } : null,
-});
-const base: ExportFilters = { date: "2026-10-05", sampleType: "", design: "", pattern: "", materialKind: "", material: "" };
+const day = { mode: "date" as const, date: "2026-10-05", from: "2026-09-29", to: "2026-10-05" };
+const base: ExportFilters = { period: day, sampleType: "", design: "", pattern: "" };
 
+// Body 1 Plain, Body 2 Non-Plain with CARRARA + ROY BODY.
 const s1 = sample({
-  id: "a", designCategory: "NON_PLAIN_BODY", designPatterns: [v("p1", "CARRARA"), v("p2", "ROY BODY", "ROY_BODY")],
-  formulations: [
-    fm("MAIN_BODY", [
-      { kind: "RESIN", material: v("r1", "INEOS"), size: null, unit: "GRAMS", quantity: "1200" },
-      { kind: "RESIN", material: v("r2", "ABC"), size: null, unit: "PERCENT", quantity: "30" },
-    ]),
-    fm("DESIGN_ROY_BODY", [{ kind: "RESIN", material: v("r1", "INEOS"), size: null, unit: "GRAMS", quantity: "300" }],
-      [{ kind: "RESIN", material: v("r1", "INEOS"), size: null, unit: "GRAMS", quantity: "50" }]),
-  ],
+  id: "a",
+  numberOfBodies: 2,
+  bodies: [body(1, { designCategory: "PLAIN_BODY" }), body(2, { designCategory: "NON_PLAIN_BODY", designPatterns: [v("p1", "CARRARA"), v("p2", "ROY BODY", "ROY_BODY")] })],
 });
 const s2 = sample({ id: "b", sampleType: v("t2", "Inspired Sample", "INSPIRED"), inwardEntry: { id: "e1", serialNo: 1 } });
-const s3 = sample({ id: "c", sampleDate: "2026-10-04", designCategory: "PLAIN_BODY" });
-const inward = new Map([["e1", { designCategory: "PLAIN_BODY" as const, designPatterns: [] }]]);
+const s3 = sample({ id: "c", sampleDate: "2026-10-04", numberOfBodies: 1, bodies: [body(1, { designCategory: "PLAIN_BODY" })] });
+const inward = new Map([["e1", { categories: ["PLAIN_BODY" as const], patterns: [] }]]);
+
+type PBody = ProductionDetail["bodies"][number];
+const pbody = (index: number, over: Partial<PBody> = {}): PBody => ({
+  index, designCategory: null, designPatterns: [], royBody: null, postPress: null, postPolish: null, ...over,
+});
+const prod = (over: Partial<ProductionDetail>): ProductionDetail => ({
+  id: "p", serialNo: 1, slabNumber: 1, sampleDate: "2026-10-05", designName: null, numberOfBodies: null,
+  bodies: [], legacyBodies: false, attachments: [], remarks: null,
+  createdBy: null, updatedBy: null, createdAt: "", updatedAt: "", ...over,
+});
+const p1 = prod({ id: "x", numberOfBodies: 1, bodies: [pbody(1, { designCategory: "NON_PLAIN_BODY", designPatterns: [v("p2", "ROY BODY", "ROY_BODY")] })] });
+const p2 = prod({ id: "y", serialNo: 2, numberOfBodies: 1, bodies: [pbody(1, { designCategory: "PLAIN_BODY" })] });
+const p3 = prod({ id: "z", serialNo: 3, sampleDate: "2026-10-01" });
+const ids = (rows: ReturnType<typeof applyFilters>) => rows.map((r) => `${r.source}:${r.id}`);
 
 describe("filtered export", () => {
-  it("keeps only the selected date", () => {
-    expect(applyFilters([s1, s2, s3], inward, base).map((r) => r.sample.id)).toEqual(["a", "b"]);
+  it("keeps only the selected date; All sample types includes production samples", () => {
+    expect(ids(applyFilters([s1, s2, s3], inward, [p1, p2, p3], base))).toEqual(["lab:a", "lab:b", "production:x", "production:y"]);
   });
   it("filters by type, design (incl. Inspired design from Inward) and pattern", () => {
-    expect(applyFilters([s1, s2], inward, { ...base, sampleType: "INSPIRED" }).map((r) => r.sample.id)).toEqual(["b"]);
-    expect(applyFilters([s1, s2], inward, { ...base, design: "PLAIN_BODY" }).map((r) => r.sample.id)).toEqual(["b"]);
-    expect(applyFilters([s1, s2], inward, { ...base, pattern: "p2" }).map((r) => r.sample.id)).toEqual(["a"]);
+    expect(ids(applyFilters([s1, s2], inward, [p1], { ...base, sampleType: "INSPIRED" }))).toEqual(["lab:b"]);
+    // s1 matches Plain (Body 1) and Non-Plain (Body 2): any body counts.
+    expect(ids(applyFilters([s1, s2], inward, [p1, p2], { ...base, design: "PLAIN_BODY" }))).toEqual(["lab:a", "lab:b", "production:y"]);
+    expect(ids(applyFilters([s1, s2], inward, [p1, p2], { ...base, design: "NON_PLAIN_BODY" }))).toEqual(["lab:a", "production:x"]);
+    expect(ids(applyFilters([s1, s2], inward, [p1, p2], { ...base, pattern: "p2" }))).toEqual(["lab:a", "production:x"]);
   });
-  it("material filter keeps users of the material and sums grams across formulations", () => {
-    const rows = applyFilters([s1, s2], inward, { ...base, materialKind: "RESIN", material: "r1" });
-    expect(rows.map((r) => r.sample.id)).toEqual(["a"]);
-    expect(rows[0].consumption?.grams).toBe(1550); // main + Roy Body + the Roy Body's own vein Roy Body
-    expect(consumptionOf(s1, "RESIN")).toMatchObject({ grams: 1550, percentEntries: 1 });
+  it("Production Samples shows production samples only, with the other filters", () => {
+    const f = { ...base, sampleType: "PRODUCTION" as const };
+    expect(ids(applyFilters([s1, s2], inward, [p1, p2, p3], f))).toEqual(["production:x", "production:y"]);
+    expect(ids(applyFilters([s1], inward, [p1, p2], { ...f, design: "NON_PLAIN_BODY" }))).toEqual(["production:x"]);
+    expect(applyFilters([s1], inward, [p2], f)[0]).toMatchObject({ typeLabel: "Production Sample", bodies: 1, design: { categories: ["PLAIN_BODY"], source: "production" } });
   });
-  it("parses URL filters safely", () => {
-    expect(parseFilters({ date: "bad", type: "X", mkind: "RESIN" }, "2026-10-05")).toEqual({ ...base, materialKind: "RESIN" });
+  it("parses URL filters safely (old material filters are ignored)", () => {
+    expect(parseFilters({ date: "bad", type: "X", mkind: "RESIN", material: "r1" }, "2026-10-05")).toEqual(base);
+    expect(parseFilters({ date: "2026-10-05", type: "PRODUCTION" }, "2026-10-05").sampleType).toBe("PRODUCTION");
+  });
+  it("follows the Production Date: All and Date Range", () => {
+    const all = { mode: "all" as const, date: "2026-10-05", from: "", to: "2026-10-05" };
+    expect(ids(applyFilters([s1, s2, s3], inward, [p1, p3], { ...base, period: all }))).toEqual(["lab:c", "lab:a", "lab:b", "production:z", "production:x"]);
+    const range = { mode: "range" as const, date: "2026-10-04", from: "2026-10-01", to: "2026-10-04" };
+    expect(ids(applyFilters([s1, s2, s3], inward, [p1, p3], { ...base, period: range }))).toEqual(["lab:c", "production:z"]);
   });
 });

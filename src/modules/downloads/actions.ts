@@ -1,11 +1,14 @@
 "use server";
 
+import { plantToday } from "@/lib/plant-time";
 import { requirePermission } from "@/lib/session";
-import { countsOn } from "./data";
+import { countsIn } from "./data";
+import { parsePeriod, periodProblem, periodQuery, type Period } from "./period";
 
-/** How many records a date has — shown before downloading. */
-export async function countsForDateAction(date: string) {
+/** How many records a Production Date selection holds — shown before downloading. */
+export async function countsForPeriodAction(input: Period) {
   await requirePermission("downloads.view");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date))) return null;
-  return countsOn(date);
+  if (periodProblem(input)) return null;
+  // Re-read through the same parser the download uses, so the count and the file agree.
+  return countsIn(parsePeriod(periodQuery(input), plantToday()));
 }

@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { RoyBodyView } from "@/components/lab/RoyBodyView";
-import { formatDate, formatDateTime, formatNumber } from "@/lib/utils";
+import { BodyLabTable, BodyViewCard, BodyViewPart, LegacyBodiesNote } from "@/components/lab/BodyView";
+import { formatDate, formatDateTime } from "@/lib/utils";
 import { Block, Grid, Item, Nested } from "@/modules/samples/components/SampleDetailView";
 import type { InwardDetail } from "../queries";
 
 /** Read-only, form-shaped view of an Inward / Outward entry. */
 export function InwardDetailView({ e }: { e: InwardDetail }) {
-  const hasRoy = e.designPatterns.some((p) => p.code === "ROY_BODY");
   return (
     <div className="space-y-4">
       <Block index={1} title="Sample Details">
@@ -31,56 +31,35 @@ export function InwardDetailView({ e }: { e: InwardDetail }) {
         </Grid>
       </Block>
 
-      <Block index={2} title="L, a, b Values">
-        {!e.numberOfBodies ? (
-          <p className="text-sm text-ink-3">Not recorded.</p>
+      <Block index={2} title="Bodies">
+        {e.bodies.length === 0 ? (
+          <p className="text-sm text-ink-3">Number of Bodies not recorded.</p>
         ) : (
-          <div className="max-w-2xl overflow-x-auto">
-            <table className="w-full text-[14px]">
-              <thead>
-                <tr>
-                  <th className="th">Body</th>
-                  <th className="th">L</th>
-                  <th className="th normal-case">a</th>
-                  <th className="th normal-case">b</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Array.from({ length: e.numberOfBodies }, (_, i) => {
-                  const m = e.measurements.find((x) => x.bodyIndex === i + 1);
-                  return (
-                    <tr key={i}>
-                      <td className="td font-semibold">Body {i + 1}</td>
-                      <td className="td tabular-nums">{formatNumber(m?.l)}</td>
-                      <td className="td tabular-nums">{formatNumber(m?.a)}</td>
-                      <td className="td tabular-nums">{formatNumber(m?.b)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="space-y-4">
+            {e.legacyBodies && <LegacyBodiesNote parts="Design" />}
+            {e.bodies.map((b) => (
+              <BodyViewCard key={b.index} index={b.index}>
+                <BodyViewPart title="Design Pattern">
+                  <Grid>
+                    <Item label="Design" value={b.designCategory === "PLAIN_BODY" ? "Plain Body" : b.designCategory === "NON_PLAIN_BODY" ? "Non-Plain Body" : null} />
+                    {b.designCategory === "NON_PLAIN_BODY" && <Item label="Design Pattern(s)" value={b.designPatterns.map((p) => p.label).join(", ")} wide />}
+                  </Grid>
+                  {b.designCategory === "NON_PLAIN_BODY" && b.designPatterns.some((p) => p.code === "ROY_BODY") && (
+                    <Nested title={`Roy Body Formulation (Body ${b.index})`}>
+                      <RoyBodyView f={b.royBody} />
+                    </Nested>
+                  )}
+                </BodyViewPart>
+                <BodyViewPart title={`L, a, b Values — Body ${b.index}`}>
+                  <BodyLabTable rows={[{ value: b.lab }]} />
+                </BodyViewPart>
+              </BodyViewCard>
+            ))}
           </div>
         )}
       </Block>
 
-      <Block index={3} title="Design Pattern">
-        <Grid>
-          <Item
-            label="Design"
-            value={e.designCategory === "PLAIN_BODY" ? "Plain Body" : e.designCategory === "NON_PLAIN_BODY" ? "Non-Plain Body" : null}
-          />
-          {e.designCategory === "NON_PLAIN_BODY" && (
-            <Item label="Design Pattern(s)" value={e.designPatterns.map((p) => p.label).join(", ")} wide />
-          )}
-        </Grid>
-        {hasRoy && (
-          <Nested title="Roy Body Formulation">
-            <RoyBodyView f={e.royBody} />
-          </Nested>
-        )}
-      </Block>
-
-      <Block index={4} title="Lab Recreation Attempts">
+      <Block index={3} title="Lab Recreation Attempts">
         {e.recreationAttempts ? (
           <p className="whitespace-pre-wrap text-[15px]">{e.recreationAttempts}</p>
         ) : (

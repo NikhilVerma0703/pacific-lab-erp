@@ -117,6 +117,49 @@ export const royBodySchema = formulationSchema
     }
   });
 
+// ── design (shared by every form's body sections) ──────────────────────────
+
+export const designCategorySchema = z.enum(["", "PLAIN_BODY", "NON_PLAIN_BODY"]).transform((v) => (v === "" ? null : v));
+
+/** Flag a value picked twice in a multi-select (patterns, vein methods). */
+export function flagDuplicates(ctx: z.RefinementCtx, list: { id?: string; label: string }[], path: (string | number)[]) {
+  const seen = new Set<string>();
+  for (const r of list) {
+    const k = r.id ?? r.label.trim().toLowerCase();
+    if (seen.has(k)) {
+      ctx.addIssue({ code: "custom", path, message: `“${r.label}” is selected twice.` });
+      return;
+    }
+    seen.add(k);
+  }
+}
+
+// ── one body of a lab sample ────────────────────────────────────────────────
+
+/**
+ * Body 1 … n of a (Creative) lab sample — each body is recorded on its own:
+ * Material Choices & Pigments → Design (with the Roy Body it may open) →
+ * Vein (with Mixer Type and its Roy Body) → this body's L, a, b.
+ */
+export const sampleBodySchema = z
+  .object({
+    main: formulationSchema,
+    designCategory: designCategorySchema,
+    designPatterns: z.array(masterRefSchema).max(30),
+    designRoyBody: royBodySchema,
+    mixerType: masterRefSchema.nullable(),
+    hasVein: z.enum(["", "YES", "NO"]).transform((v) => (v === "" ? null : v === "YES")),
+    veinMethods: z.array(masterRefSchema).max(30),
+    veinNotes: optionalText(1000),
+    veinRoyBody: formulationSchema,
+    postPress: labRowSchema,
+    postPolish: labRowSchema,
+  })
+  .superRefine((v, ctx) => {
+    flagDuplicates(ctx, v.designPatterns, ["designPatterns"]);
+    flagDuplicates(ctx, v.veinMethods, ["veinMethods"]);
+  });
+
 // ── the sample ───────────────────────────────────────────────────────────────
 
 export const sampleFormSchema = z
@@ -142,40 +185,14 @@ export const sampleFormSchema = z
       .optional()
       .transform((v) => (!v ? null : v === "YES")),
     numberOfBodies: optionalNumber({ min: 1, max: MAX_BODIES, int: true, label: "Number of Bodies" }),
-    main: formulationSchema,
-    designCategory: z
-      .enum(["", "PLAIN_BODY", "NON_PLAIN_BODY"])
-      .transform((v) => (v === "" ? null : v)),
-    designPatterns: z.array(masterRefSchema).max(30),
-    designRoyBody: royBodySchema,
-    mixerType: masterRefSchema.nullable(),
-    hasVein: z.enum(["", "YES", "NO"]).transform((v) => (v === "" ? null : v === "YES")),
-    veinMethods: z.array(masterRefSchema).max(30),
-    veinNotes: optionalText(1000),
-    veinRoyBody: formulationSchema,
-    postPress: z.array(labRowSchema).max(MAX_BODIES),
-    postPolish: z.array(labRowSchema).max(MAX_BODIES),
+    /** Body 1 … n — one complete section per body. */
+    bodies: z.array(sampleBodySchema).max(MAX_BODIES),
     attachmentIds: z.array(z.string().min(1)).max(10, "At most 10 files per sample."),
     remarks: optionalText(4000),
   })
   .superRefine((v, ctx) => {
-    const dupes = (list: { id?: string; label: string }[], path: string) => {
-      const seen = new Set<string>();
-      for (const r of list) {
-        const k = r.id ?? r.label.trim().toLowerCase();
-        if (seen.has(k)) {
-          ctx.addIssue({ code: "custom", path: [path], message: `“${r.label}” is selected twice.` });
-          return;
-        }
-        seen.add(k);
-      }
-    };
-    dupes(v.designPatterns, "designPatterns");
-    dupes(v.veinMethods, "veinMethods");
-    if (v.numberOfBodies !== null) {
-      if (v.postPress.length > v.numberOfBodies || v.postPolish.length > v.numberOfBodies) {
-        ctx.addIssue({ code: "custom", path: ["numberOfBodies"], message: "More L/a/b rows than bodies." });
-      }
+    if (v.numberOfBodies !== null && v.bodies.length > v.numberOfBodies) {
+      ctx.addIssue({ code: "custom", path: ["numberOfBodies"], message: "More body sections than bodies." });
     }
   });
 
@@ -189,6 +206,8 @@ export type ComponentRowInput = z.input<typeof componentRowSchema>;
 export type RoyBodyInput = z.input<typeof royBodySchema>;
 export type RoyBodyData = z.output<typeof royBodySchema>;
 export type LabRowInput = z.input<typeof labRowSchema>;
+export type SampleBodyInput = z.input<typeof sampleBodySchema>;
+export type SampleBodyData = z.output<typeof sampleBodySchema>;
 
 export const emptyComponentRow = (): ComponentRowInput => ({ material: null, size: null, unit: "", quantity: "" });
 
@@ -213,6 +232,21 @@ export const emptyRoyBody = (): RoyBodyInput => ({
   postPolish: [],
 });
 
+/** A blank Body section. */
+export const emptySampleBody = (): SampleBodyInput => ({
+  main: emptyFormulation(),
+  designCategory: "",
+  designPatterns: [],
+  designRoyBody: emptyRoyBody(),
+  mixerType: null,
+  hasVein: "",
+  veinMethods: [],
+  veinNotes: "",
+  veinRoyBody: emptyFormulation(),
+  postPress: emptyLabRow(),
+  postPolish: emptyLabRow(),
+});
+
 /** A blank sample form with the suggested numbers and today's date. */
 export function newSampleInput(args: { serialNo: number; slabNumber: number; today: string }): SampleFormInput {
   return {
@@ -223,17 +257,7 @@ export function newSampleInput(args: { serialNo: number; slabNumber: number; tod
     designName: "",
     physicalSamplePresent: "",
     numberOfBodies: "",
-    main: emptyFormulation(),
-    designCategory: "",
-    designPatterns: [],
-    designRoyBody: emptyRoyBody(),
-    mixerType: null,
-    hasVein: "",
-    veinMethods: [],
-    veinNotes: "",
-    veinRoyBody: emptyFormulation(),
-    postPress: [],
-    postPolish: [],
+    bodies: [],
     attachmentIds: [],
     remarks: "",
   };
