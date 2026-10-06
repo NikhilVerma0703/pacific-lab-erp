@@ -5,6 +5,7 @@ import { fail, type ActionResult } from "@/lib/action-result";
 import { PermissionError, requirePermission } from "@/lib/session";
 import { storage } from "@/lib/storage";
 import { sampleFormSchema, type SampleFormInput } from "./schema";
+import { nextAfterSave, type NextStep } from "./next-step";
 import { deleteSample, saveSample, SampleSaveError } from "./service";
 
 async function removeFiles(keys: string[]) {
@@ -15,7 +16,7 @@ async function removeFiles(keys: string[]) {
 export async function saveSampleAction(
   input: SampleFormInput,
   opts: { id?: string; status: "DRAFT" | "SUBMITTED"; autoSerial?: boolean; autoSlab?: boolean },
-): Promise<ActionResult<{ id: string; serialNo: number; slabNumber: number | null; inwardUrl: string | null }>> {
+): Promise<ActionResult<{ id: string; serialNo: number; slabNumber: number | null; next: NextStep }>> {
   try {
     const user = await requirePermission(opts.id ? "sample.edit" : "sample.create");
 
@@ -28,6 +29,10 @@ export async function saveSampleAction(
         if (!fieldErrors[key]) fieldErrors[key] = issue.message;
       }
       return fail("Some values are not valid — see the highlighted fields.", fieldErrors);
+    }
+    // A saved (not draft) sample must say where its physical sample stands.
+    if (opts.status === "SUBMITTED" && parsed.data.physicalSamplePresent === null) {
+      return fail("Answer “Physical Sample Available?” before saving.", { physicalSamplePresent: "Choose Yes or No." });
     }
 
     const result = await saveSample({
@@ -50,7 +55,12 @@ export async function saveSampleAction(
         id: result.id,
         serialNo: result.serialNo,
         slabNumber: result.slabNumber,
-        inwardUrl: result.needsInward ? `/inward-outward?sample=${result.id}#entry` : null,
+        next: nextAfterSave({
+          id: result.id,
+          status: opts.status,
+          physicalSampleAvailable: result.physicalSampleAvailable,
+          hasInwardEntry: result.hasInwardEntry,
+        }),
       },
       message:
         opts.status === "DRAFT"

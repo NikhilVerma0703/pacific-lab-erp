@@ -16,7 +16,7 @@ describe("production sample form schema", () => {
   it("parses each body's readings and its Roy Body", () => {
     const r = productionFormSchema.parse({
       ...blank(),
-      designName: " Calacatta Gold ",
+      designName: { id: "dn1", label: "Calacatta Gold" },
       numberOfBodies: "2",
       bodies: [
         {
@@ -31,7 +31,7 @@ describe("production sample form schema", () => {
       ],
       remarks: "  Slight shade variation  ",
     });
-    expect(r.designName).toBe("Calacatta Gold");
+    expect(r.designName).toEqual({ id: "dn1", label: "Calacatta Gold" });
     expect(r.bodies[0].postPress).toEqual({ l: 72.5, a: -0.3, b: 2 });
     expect(r.bodies[1].postPress).toEqual({ l: null, a: null, b: null });
     expect(r.bodies[1].postPolish).toEqual({ l: 70, a: 0.1, b: 2.2 });

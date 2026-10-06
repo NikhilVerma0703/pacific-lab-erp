@@ -154,7 +154,7 @@ export default async function DownloadsPage({ searchParams }: { searchParams: Pr
                           <td className="td whitespace-nowrap">{formatDate(r.date)}</td>
                           <td className="td tabular-nums">{r.slabNumber ?? "—"}</td>
                           <td className="td">
-                            {r.source === "production" ? <span className="badge bg-accent-bg text-accent">{r.typeLabel}</span> : (r.typeLabel ?? "—")}
+                            {r.source === "production" ? <span className="badge bg-accent-bg text-accent">{r.typeLabel}</span> : r.typeLabel}
                           </td>
                           <td className="td">
                             {designText(r.design)}
@@ -182,7 +182,7 @@ export default async function DownloadsPage({ searchParams }: { searchParams: Pr
                         </span>
                       </p>
                       <p className="text-ink-2">
-                        {r.typeLabel ?? "—"} · {r.design.patterns.map((p) => p.label).join(", ") || (r.design.categories.includes("PLAIN_BODY") ? "Plain Body" : "No design")}
+                        {r.typeLabel} · {r.design.patterns.map((p) => p.label).join(", ") || (r.design.categories.includes("PLAIN_BODY") ? "Plain Body" : "No design")}
                       </p>
                       <Link href={href(r)} className="btn-secondary btn-sm mt-1">
                         <FileSearch className="size-3.5" /> View

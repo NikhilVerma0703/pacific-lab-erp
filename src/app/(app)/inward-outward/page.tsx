@@ -1,4 +1,5 @@
 import { notFound, redirect } from "next/navigation";
+import { AlertTriangle } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { can } from "@/lib/permissions";
 import { requireUser } from "@/lib/session";
@@ -15,15 +16,18 @@ import { plantToday } from "@/lib/plant-time";
 export const metadata = { title: "Sample Inward / Outward" };
 export const dynamic = "force-dynamic";
 
-export default async function InwardOutwardPage({ searchParams }: { searchParams: Promise<{ sample?: string }> }) {
+export default async function InwardOutwardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ sample?: string; rectification?: string }>;
+}) {
   const user = await requireUser();
   if (!can(user, "inward.view")) notFound();
-  const { sample: sampleId } = await searchParams;
+  const { sample: sampleId, rectification: rectifiedId } = await searchParams;
 
-  // Arriving from Sample Data Entry (Inspired + physical sample present).
-  let linked = sampleId ? await getLinkableSample(sampleId) : null;
+  // Arriving from Sample Data Entry with Physical Sample Available? = Yes.
+  const linked = sampleId ? await getLinkableSample(sampleId) : null;
   if (linked?.existingEntryId) redirect(`/inward-outward/${linked.existingEntryId}/edit`);
-  if (linked && !linked.isInspired) linked = null;
 
   const canCreate = can(user, "inward.create");
   const [options, serialNo, recent, rectification] = await Promise.all([
@@ -32,6 +36,9 @@ export default async function InwardOutwardPage({ searchParams }: { searchParams
     getRecentInward(10),
     getRectification(),
   ]);
+
+  // Arriving from Sample Data Entry with Physical Sample Available? = No.
+  const justMarked = rectifiedId ? (rectification.find((r) => r.id === rectifiedId) ?? null) : null;
 
   const nav = [
     { href: "#entry", label: "1 · Data Entry" },
@@ -84,10 +91,21 @@ export default async function InwardOutwardPage({ searchParams }: { searchParams
         <div className="border-b border-line px-4 py-3 sm:px-5">
           <h2 id="rect-h" className="text-[15px] font-bold">Rectification</h2>
           <p className="text-[13px] text-ink-2">
-            Inspired samples saved with <strong>Physical Sample Present? = No</strong>. When the sample arrives, use “Sample received”.
+            Lab samples saved with <strong>Physical Sample Available? = No</strong>. When the sample arrives, use “Sample received”.
           </p>
         </div>
+        {justMarked && (
+          <p role="status" className="mx-4 mt-4 flex items-start gap-2 rounded-lg border border-warn-fg/30 bg-warn-bg px-4 py-3 text-[14px] text-warn-fg sm:mx-5">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            <span>
+              Lab sample <strong>S.No. {justMarked.serialNo}</strong>
+              {justMarked.slabNumber ? ` (Slab ${justMarked.slabNumber})` : ""} was saved with Physical Sample Available? = No. It is
+              listed below, marked <strong>Awaiting physical sample</strong>.
+            </span>
+          </p>
+        )}
         <RectificationList
+          highlightId={justMarked?.id}
           rows={rectification}
           canRecord={canCreate}
           canEdit={can(user, "sample.edit")}

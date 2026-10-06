@@ -31,7 +31,7 @@ export async function nextInwardSerial(db: Db): Promise<number> {
 
 /**
  * Create or update an Inward / Outward entry in one transaction.
- * Linking it to an Inspired lab sample marks that sample's physical sample as
+ * Linking it to a lab sample marks that sample's physical sample as
  * present, which moves it out of Rectification.
  */
 export async function saveInward(args: {
@@ -74,12 +74,9 @@ export async function saveInward(args: {
         if (labSampleId && labSampleId !== existing?.labSampleId) {
           const sample = await tx.labSample.findUnique({
             where: { id: labSampleId },
-            select: { serialNo: true, sampleType: { select: { code: true } }, inwardEntry: { select: { serialNo: true } } },
+            select: { serialNo: true, inwardEntry: { select: { serialNo: true } } },
           });
           if (!sample) throw new InwardSaveError("The linked lab sample no longer exists.");
-          if (sample.sampleType?.code !== VALUE_CODE.INSPIRED_SAMPLE) {
-            throw new InwardSaveError(`Lab sample S.No. ${sample.serialNo} is not an Inspired sample.`);
-          }
           if (sample.inwardEntry) {
             throw new InwardSaveError(
               `Lab sample S.No. ${sample.serialNo} is already recorded as Inward/Outward Serial No. ${sample.inwardEntry.serialNo}.`,
@@ -92,7 +89,9 @@ export async function saveInward(args: {
           entryDate: new Date(`${data.entryDate ?? (existing ? existing.entryDate.toISOString().slice(0, 10) : todayInPlant())}T00:00:00Z`),
           labSampleId: labSampleId ?? null,
           companyId: await resolve(MASTER.COMPANY, data.company),
-          sampleDesignName: data.sampleDesignName,
+          designNameId: await resolve(MASTER.DESIGN_NAME, data.sampleDesignName),
+          // Moved into the Design Names list by this save.
+          legacySampleDesignName: null,
           numberOfBodies: data.numberOfBodies,
           // Design now lives on each body (InwardBody); the entry-level column
           // only remains for entries saved before bodies existed.
@@ -169,6 +168,7 @@ export async function saveInward(args: {
 
 export const inwardInclude = {
   company: { select: { id: true, label: true, code: true, isActive: true } },
+  designNameValue: { select: { id: true, label: true, code: true, isActive: true } },
   labSample: { select: { id: true, serialNo: true, slabNumber: true, sampleDate: true } },
   createdBy: { select: { name: true } },
   updatedBy: { select: { name: true } },

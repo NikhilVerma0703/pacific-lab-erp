@@ -2,19 +2,18 @@
  * Filtered export — the filter model and the matching logic. Pure (no
  * database), shared by the page, the Excel route and the unit tests.
  *
- * Sample Type covers lab samples (Creative / Inspired) and Production
- * Samples; "All sample types" includes both.
+ * Sample Type picks Lab Samples (Sample Data Entry) or Production Samples;
+ * "All sample types" includes both.
  */
 import type { ComponentDTO, SampleDetail } from "@/modules/samples/queries";
 import type { ProductionDetail } from "@/modules/production/queries";
 import { inPeriod, parsePeriod, periodQuery, type Period } from "./period";
 import { categoriesOf, unionValues, type DesignCategoryValue } from "@/modules/samples/bodies";
 
-export type SampleTypeFilter = "" | "CREATIVE" | "INSPIRED" | "PRODUCTION";
+export type SampleTypeFilter = "" | "LAB" | "PRODUCTION";
 
 export const SAMPLE_TYPE_OPTIONS: { value: Exclude<SampleTypeFilter, "">; label: string }[] = [
-  { value: "CREATIVE", label: "Creative Sample" },
-  { value: "INSPIRED", label: "Inspired Sample" },
+  { value: "LAB", label: "Lab Samples" },
   { value: "PRODUCTION", label: "Production Samples" },
 ];
 
@@ -29,7 +28,7 @@ export interface ExportFilters {
 
 /** Do these filters ask for lab samples / production samples at all? */
 export const wantsLab = (f: Pick<ExportFilters, "sampleType">) => f.sampleType !== "PRODUCTION";
-export const wantsProduction = (f: Pick<ExportFilters, "sampleType">) => f.sampleType === "" || f.sampleType === "PRODUCTION";
+export const wantsProduction = (f: Pick<ExportFilters, "sampleType">) => f.sampleType !== "LAB";
 
 /** Read filters from a URL query; anything invalid falls back to "any". */
 export function parseFilters(q: Record<string, string | string[] | undefined>, today: string): ExportFilters {
@@ -37,7 +36,8 @@ export function parseFilters(q: Record<string, string | string[] | undefined>, t
   const pick = <T extends string>(v: string, allowed: readonly T[]): T | "" => ((allowed as readonly string[]).includes(v) ? (v as T) : "");
   return {
     period: parsePeriod(q, today),
-    sampleType: pick(one("type"), ["CREATIVE", "INSPIRED", "PRODUCTION"] as const),
+    // Links saved before Sample Type was removed (type=CREATIVE / INSPIRED) read as "all".
+    sampleType: pick(one("type"), ["LAB", "PRODUCTION"] as const),
     design: pick(one("design"), ["PLAIN_BODY", "NON_PLAIN_BODY"] as const),
     pattern: one("pattern").slice(0, 40),
   };
@@ -56,7 +56,7 @@ export interface DesignInfo {
   categories: DesignCategoryValue[];
   /** Every pattern of every body. */
   patterns: { id: string; label: string }[];
-  /** Where the design came from — Inspired samples carry it on their Inward entry. */
+  /** Where the design came from — a lab sample without its own design shows the one on its Inward / Outward entry. */
   source: "sample" | "inward" | "production" | null;
 }
 
@@ -70,7 +70,7 @@ export function designAcross(bodies: { designCategory: DesignCategoryValue | nul
   };
 }
 
-/** A sample's design across its bodies, or (Inspired) the one on its Inward / Outward entry. */
+/** A sample's design across its bodies, or else the one recorded on its Inward / Outward entry. */
 export function effectiveDesign(s: Pick<SampleDetail, "bodies">, inward?: BodiesDesign | null): DesignInfo {
   const own = designAcross(s.bodies);
   if (own.categories.length) return { ...own, source: "sample" };
@@ -93,7 +93,8 @@ export type FilteredRow = {
   serialNo: number;
   slabNumber: number | null;
   date: string;
-  typeLabel: string | null;
+  /** "Lab Sample" or "Production Sample". */
+  typeLabel: string;
   /** How many bodies the record has. */
   bodies: number;
   design: DesignInfo;
@@ -115,7 +116,6 @@ export function applyFilters(
   if (wantsLab(f)) {
     for (const s of samples) {
       if (!inPeriod(s.sampleDate, f.period)) continue;
-      if (f.sampleType && s.sampleType?.code !== f.sampleType) continue;
       const design = effectiveDesign(s, s.inwardEntry ? inwardDesigns.get(s.inwardEntry.id) : null);
       if (!designOk(design)) continue;
       lab.push({
@@ -125,7 +125,7 @@ export function applyFilters(
         serialNo: s.serialNo,
         slabNumber: s.slabNumber,
         date: s.sampleDate,
-        typeLabel: s.sampleType?.label ?? null,
+        typeLabel: "Lab Sample",
         bodies: s.bodies.length,
         design,
       });

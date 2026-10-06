@@ -124,7 +124,7 @@ export function InwardForm({
             <div className="flex flex-wrap items-center gap-3 rounded-lg border border-accent/40 bg-accent-bg px-4 py-3 text-sm">
               <Link2 className="size-4 text-accent" />
               <span className="flex-1">
-                Recording the physical sample for Inspired lab sample{" "}
+                Recording the physical sample for lab sample{" "}
                 <Link href={`/samples/${linked.id}`} className="font-semibold text-accent underline">
                   S.No. {linked.serialNo}
                 </Link>
@@ -186,8 +186,23 @@ export function InwardForm({
                   )}
                 />
               </Field>
-              <Field label="Sample Design Name" htmlFor="io-design-name" error={errorAt(errors, "sampleDesignName")}>
-                <input id="io-design-name" className="input" autoComplete="off" {...register("sampleDesignName")} />
+              <Field label="Sample Design Name" htmlFor="io-design-name" error={errorAt(errors, "sampleDesignName.label") ?? errorAt(errors, "sampleDesignName")}>
+                <Controller
+                  control={control}
+                  name="sampleDesignName"
+                  render={({ field }) => (
+                    <MasterPicker
+                      id="io-design-name"
+                      options={options[MASTER.DESIGN_NAME]}
+                      value={field.value ?? null}
+                      onChange={field.onChange}
+                      allowCustom={canAddMaster}
+                      invalid={!!(errorAt(errors, "sampleDesignName.label") ?? errorAt(errors, "sampleDesignName"))}
+                      noun="design name"
+                      placeholder="Select or type design name"
+                    />
+                  )}
+                />
               </Field>
               <Field
                 label="Number of Bodies (n)"

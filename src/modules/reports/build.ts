@@ -22,7 +22,6 @@ export const OTHER = "Other";
 
 export interface ReportSampleRow {
   date: string; // YYYY-MM-DD
-  typeCode: string | null; // CREATIVE / INSPIRED / null / custom
   /** Design names across the sample's bodies: "Plain Body", patterns, or "Non-Plain (no pattern)" — each once. */
   designs: string[];
   components: { kind: MaterialKind; material: string | null; unit: "GRAMS" | "PERCENT" | null; quantity: number | null }[];
@@ -48,11 +47,10 @@ export interface ReportData {
   from: string;
   to: string;
   dates: string[];
-  totals: { samples: number; creative: number; inspired: number; otherType: number; withoutDesign: number; productionSamples: number };
+  totals: { samples: number; withoutDesign: number; productionSamples: number };
   production: { date: string; count: number }[];
   /** Production Samples (received from the plant) per date, from their Date field. */
   productionSamples: { date: string; count: number }[];
-  creativeVsInspired: { date: string; creative: number; inspired: number }[];
   designs: { pattern: string; count: number }[];
   consumption: Record<MaterialKind, ConsumptionData>;
 }
@@ -86,22 +84,12 @@ export function buildReport(rows: ReportSampleRow[], today: string, days: Report
   for (const d of productionDates) if (productionPerDate.has(d)) productionPerDate.set(d, productionPerDate.get(d)! + 1);
   const productionSamples = dates.map((date) => ({ date, count: productionPerDate.get(date)! }));
 
-  const perDate = new Map(dates.map((d) => [d, { count: 0, creative: 0, inspired: 0 }]));
+  const perDate = new Map(dates.map((d) => [d, 0]));
   const designCounts = new Map<string, number>();
-  let creative = 0;
-  let inspired = 0;
   let withoutDesign = 0;
 
   for (const s of samples) {
-    const day = perDate.get(s.date)!;
-    day.count++;
-    if (s.typeCode === "CREATIVE") {
-      day.creative++;
-      creative++;
-    } else if (s.typeCode === "INSPIRED") {
-      day.inspired++;
-      inspired++;
-    }
+    perDate.set(s.date, perDate.get(s.date)! + 1);
 
     // Each sample counts once per design pattern it carries (on any body).
     const designs = [...new Set(s.designs)];
@@ -166,19 +154,11 @@ export function buildReport(rows: ReportSampleRow[], today: string, days: Report
     dates,
     totals: {
       samples: samples.length,
-      creative,
-      inspired,
-      otherType: samples.length - creative - inspired,
       withoutDesign,
       productionSamples: productionSamples.reduce((a, d) => a + d.count, 0),
     },
-    production: dates.map((date) => ({ date, count: perDate.get(date)!.count })),
+    production: dates.map((date) => ({ date, count: perDate.get(date)! })),
     productionSamples,
-    creativeVsInspired: dates.map((date) => ({
-      date,
-      creative: perDate.get(date)!.creative,
-      inspired: perDate.get(date)!.inspired,
-    })),
     designs: [...designCounts.entries()]
       .map(([pattern, count]) => ({ pattern, count }))
       .sort((a, b) => b.count - a.count || a.pattern.localeCompare(b.pattern)),

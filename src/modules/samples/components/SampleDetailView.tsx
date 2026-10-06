@@ -14,7 +14,6 @@ import { FileViewer, type ViewableFile } from "./FileViewer";
 /** Read-only, form-shaped view of everything recorded for a sample. */
 export function SampleDetailView({ s }: { s: SampleDetail }) {
   const [viewing, setViewing] = useState<ViewableFile | null>(null);
-  const isCreative = s.sampleType?.code === "CREATIVE";
   const hasRoy = (list: { code: string | null }[]) => list.some((v) => v.code === "ROY_BODY");
   let n = 0;
   const idx = () => ++n;
@@ -26,15 +25,12 @@ export function SampleDetailView({ s }: { s: SampleDetail }) {
           <Item label="S.No." value={s.serialNo} />
           <Item label="Slab Number" value={s.slabNumber} />
           <Item label="Date" value={formatDate(s.sampleDate)} />
-          <Item label="Sample Type" value={s.sampleType?.label} />
           <Item label="Design Name" value={s.designName} />
-          {isCreative && <Item label="Number of Bodies" value={s.numberOfBodies} />}
-          {s.sampleType?.code === "INSPIRED" && (
-            <Item
-              label="Physical Sample Present?"
-              value={s.physicalSamplePresent === null ? null : s.physicalSamplePresent ? "Yes" : "No (Rectification)"}
-            />
-          )}
+          <Item label="Number of Bodies" value={s.numberOfBodies} />
+          <Item
+            label="Physical Sample Available?"
+            value={s.physicalSamplePresent === null ? null : s.physicalSamplePresent ? "Yes" : "No (Rectification)"}
+          />
           {s.inwardEntry && (
             <Item
               label="Inward / Outward"
@@ -49,56 +45,54 @@ export function SampleDetailView({ s }: { s: SampleDetail }) {
         </Grid>
       </Block>
 
-      {isCreative && (
-        <Block index={idx()} title="Bodies">
-          {s.bodies.length === 0 ? (
-            <Empty text="Number of Bodies not recorded." />
-          ) : (
-            <div className="space-y-4">
-              {s.legacyBodies && <LegacyBodiesNote />}
-              {s.bodies.map((b) => (
-                <BodyViewCard key={b.index} index={b.index}>
-                  <BodyViewPart title="Material Choices & Pigments">
-                    <FormulationView f={b.main} />
-                  </BodyViewPart>
-                  <BodyViewPart title="Design">
-                    <Grid>
-                      <Item label="Design" value={b.designCategory === "PLAIN_BODY" ? "Plain Body" : b.designCategory === "NON_PLAIN_BODY" ? "Non-Plain Body" : null} />
-                      {b.designCategory === "NON_PLAIN_BODY" && <Item label="Design Pattern(s)" value={b.designPatterns.map((p) => p.label).join(", ")} wide />}
-                    </Grid>
-                    {b.designCategory === "NON_PLAIN_BODY" && hasRoy(b.designPatterns) && (
-                      <Nested title={`Roy Body Formulation — Design (Body ${b.index})`}>
-                        <RoyBodyView f={b.designRoyBody} />
-                      </Nested>
-                    )}
-                  </BodyViewPart>
-                  <BodyViewPart title="Vein">
-                    <Grid>
-                      <Item label="Vein" value={b.hasVein === null ? null : b.hasVein ? "Yes" : "No"} />
-                      <Item label="Mixer Type" value={b.mixerType?.label} />
-                      {b.hasVein !== false && <Item label="How Vein Introduced" value={b.veinMethods.map((m) => m.label).join(", ")} wide />}
-                      {b.hasVein !== false && <Item label="Vein details" value={b.veinNotes} wide />}
-                    </Grid>
-                    {b.hasVein !== false && hasRoy(b.veinMethods) && (
-                      <Nested title={`Roy Body Formulation — Vein (Body ${b.index})`}>
-                        <FormulationView f={b.veinRoyBody} />
-                      </Nested>
-                    )}
-                  </BodyViewPart>
-                  <BodyViewPart title={`L, a, b Measurements — Body ${b.index}`}>
-                    <BodyLabTable
-                      rows={[
-                        { title: "Post Press", value: b.postPress },
-                        { title: "Post Polish", value: b.postPolish, dot: "accent" },
-                      ]}
-                    />
-                  </BodyViewPart>
-                </BodyViewCard>
-              ))}
-            </div>
-          )}
-        </Block>
-      )}
+      <Block index={idx()} title="Bodies">
+        {s.bodies.length === 0 ? (
+          <Empty text="Number of Bodies not recorded." />
+        ) : (
+          <div className="space-y-4">
+            {s.legacyBodies && <LegacyBodiesNote />}
+            {s.bodies.map((b) => (
+              <BodyViewCard key={b.index} index={b.index}>
+                <BodyViewPart title="Material Choices & Pigments">
+                  <FormulationView f={b.main} />
+                </BodyViewPart>
+                <BodyViewPart title="Design">
+                  <Grid>
+                    <Item label="Design" value={b.designCategory === "PLAIN_BODY" ? "Plain Body" : b.designCategory === "NON_PLAIN_BODY" ? "Non-Plain Body" : null} />
+                    {b.designCategory === "NON_PLAIN_BODY" && <Item label="Design Pattern(s)" value={b.designPatterns.map((p) => p.label).join(", ")} wide />}
+                  </Grid>
+                  {b.designCategory === "NON_PLAIN_BODY" && hasRoy(b.designPatterns) && (
+                    <Nested title={`Roy Body Formulation — Design (Body ${b.index})`}>
+                      <RoyBodyView f={b.designRoyBody} />
+                    </Nested>
+                  )}
+                </BodyViewPart>
+                <BodyViewPart title="Vein">
+                  <Grid>
+                    <Item label="Vein" value={b.hasVein === null ? null : b.hasVein ? "Yes" : "No"} />
+                    <Item label="Mixer Type" value={b.mixerType?.label} />
+                    {b.hasVein !== false && <Item label="How Vein Introduced" value={b.veinMethods.map((m) => m.label).join(", ")} wide />}
+                    {b.hasVein !== false && <Item label="Vein details" value={b.veinNotes} wide />}
+                  </Grid>
+                  {b.hasVein !== false && hasRoy(b.veinMethods) && (
+                    <Nested title={`Roy Body Formulation — Vein (Body ${b.index})`}>
+                      <FormulationView f={b.veinRoyBody} />
+                    </Nested>
+                  )}
+                </BodyViewPart>
+                <BodyViewPart title={`L, a, b Measurements — Body ${b.index}`}>
+                  <BodyLabTable
+                    rows={[
+                      { title: "Post Press", value: b.postPress },
+                      { title: "Post Polish", value: b.postPolish, dot: "accent" },
+                    ]}
+                  />
+                </BodyViewPart>
+              </BodyViewCard>
+            ))}
+          </div>
+        )}
+      </Block>
 
       <Block index={idx()} title="Sample Output">
         {s.attachments.length ? (

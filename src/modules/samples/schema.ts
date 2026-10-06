@@ -137,7 +137,7 @@ export function flagDuplicates(ctx: z.RefinementCtx, list: { id?: string; label:
 // ── one body of a lab sample ────────────────────────────────────────────────
 
 /**
- * Body 1 … n of a (Creative) lab sample — each body is recorded on its own:
+ * Body 1 … n of a lab sample — each body is recorded on its own:
  * Material Choices & Pigments → Design (with the Roy Body it may open) →
  * Vein (with Mixer Type and its Roy Body) → this body's L, a, b.
  */
@@ -177,9 +177,9 @@ export const sampleFormSchema = z
         }
         return s;
       }),
-    sampleType: masterRefSchema.nullable(),
-    designName: optionalText(200),
-    /** Inspired samples only. */
+    /** Design Name — from the Design Names list, or a new name typed via Other…. */
+    designName: masterRefSchema.nullable(),
+    /** Physical Sample Available? Yes → Inward / Outward; No → Rectification. */
     physicalSamplePresent: z
       .enum(["", "YES", "NO"])
       .optional()
@@ -253,8 +253,7 @@ export function newSampleInput(args: { serialNo: number; slabNumber: number; tod
     serialNo: String(args.serialNo),
     slabNumber: String(args.slabNumber),
     sampleDate: args.today,
-    sampleType: null,
-    designName: "",
+    designName: null,
     physicalSamplePresent: "",
     numberOfBodies: "",
     bodies: [],

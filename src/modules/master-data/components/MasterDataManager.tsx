@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { ArrowDown, ArrowUp, Check, Eye, EyeOff, Pencil, Plus, Search, X } from "lucide-react";
 import { toast } from "sonner";
 import { cn, formatDate } from "@/lib/utils";
@@ -29,8 +29,6 @@ type StatusFilter = "active" | "disabled" | "all";
 
 const CODE_HINT: Record<string, string> = {
   ROY_BODY: "Opens the Roy Body formulation",
-  CREATIVE: "Opens the Creative Sample form",
-  INSPIRED: "Inspired sample",
 };
 
 export function MasterDataManager({
@@ -49,6 +47,16 @@ export function MasterDataManager({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [query, setQuery] = useState("");
+  // Phones: the lists are a sideways strip — keep the open list in view.
+  const listsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const strip = listsRef.current;
+    const active = strip?.querySelector<HTMLElement>("[aria-current=page]");
+    if (!strip || !active || strip.scrollWidth <= strip.clientWidth) return;
+    const a = active.getBoundingClientRect();
+    const box = strip.getBoundingClientRect();
+    strip.scrollLeft += a.left - box.left - (box.width - a.width) / 2;
+  }, [selectedCode]);
   const [status, setStatus] = useState<StatusFilter>("active");
   const [newLabel, setNewLabel] = useState("");
   const [newError, setNewError] = useState<string>();
@@ -110,8 +118,8 @@ export function MasterDataManager({
   return (
     <div className="grid gap-5 lg:grid-cols-[260px_1fr]">
       {/* Lists */}
-      <nav aria-label="Master lists" className="lg:sticky lg:top-6 lg:self-start">
-        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 lg:mx-0 lg:flex-col lg:gap-1 lg:overflow-visible lg:px-0">
+      <nav aria-label="Master lists" className="min-w-0 lg:sticky lg:top-6 lg:self-start">
+        <div ref={listsRef} className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 lg:mx-0 lg:flex-col lg:gap-1 lg:overflow-visible lg:px-0">
           {categories.map((c) => {
             const active = c.code === selectedCode;
             return (

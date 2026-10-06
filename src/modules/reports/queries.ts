@@ -26,10 +26,9 @@ export async function getReport(days: ReportRange): Promise<ReportData> {
       sampleDate: true,
       numberOfBodies: true,
       designCategory: true,
-      sampleType: { select: { code: true } },
       designPatterns: { select: { pattern: { select: { label: true } } } },
       bodies: bodyDesignSelect,
-      // Inspired samples record their design on the Inward / Outward entry.
+      // A sample without a design of its own is reported with its Inward / Outward entry's design.
       inwardEntry: {
         select: {
           numberOfBodies: true,
@@ -66,7 +65,6 @@ export async function getReport(days: ReportRange): Promise<ReportData> {
     const bodies = own.some((b) => b.designCategory !== null) || !s.inwardEntry ? own : designsOf(s.inwardEntry);
     return {
       date: s.sampleDate.toISOString().slice(0, 10),
-      typeCode: s.sampleType?.code ?? null,
       designs: designNamesOf(bodies, "Non-Plain (no pattern)"),
       // Every body's formulations and every Roy Body: all of it was consumed making the sample.
       components: s.formulations.flatMap((f) =>

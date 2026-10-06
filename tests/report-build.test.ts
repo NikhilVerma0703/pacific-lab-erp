@@ -3,7 +3,6 @@ import { buildReport, dateWindow, parseRange, type ReportSampleRow } from "@/mod
 
 const s = (over: Partial<ReportSampleRow>): ReportSampleRow => ({
   date: "2026-10-05",
-  typeCode: "CREATIVE",
   designs: [],
   components: [],
   ...over,
@@ -30,7 +29,7 @@ describe("buildReport", () => {
           { kind: "RESIN", material: "ABC", unit: "PERCENT", quantity: 30 },
           { kind: "PIGMENT", material: "White", unit: "GRAMS", quantity: 12 },
         ] }),
-    s({ date: "2026-10-05", typeCode: "INSPIRED", designs: ["Plain Body"] }),
+    s({ date: "2026-10-05", designs: ["Plain Body"] }),
     s({ date: "2026-10-03", designs: ["CARRARA"],
         components: [{ kind: "RESIN", material: "INEOS", unit: "GRAMS", quantity: 300 }] }),
     s({ date: "2026-09-01", components: [{ kind: "RESIN", material: "INEOS", unit: "GRAMS", quantity: 9999 }] }), // outside
@@ -44,8 +43,9 @@ describe("buildReport", () => {
     expect(r.production).toHaveLength(7);
   });
 
-  it("splits creative and inspired", () => {
-    expect(r.creativeVsInspired.find((d) => d.date === "2026-10-05")).toEqual({ date: "2026-10-05", creative: 1, inspired: 1 });
+  it("has no Sample Type (Creative / Inspired) split any more", () => {
+    expect(r).not.toHaveProperty("creativeVsInspired");
+    expect(Object.keys(r.totals).sort()).toEqual(["productionSamples", "samples", "withoutDesign"]);
   });
 
   it("ranks design patterns, Plain Body included", () => {

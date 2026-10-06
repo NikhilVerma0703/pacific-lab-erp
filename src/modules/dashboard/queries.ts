@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/db";
 import { plantToday } from "@/lib/plant-time";
-import { MASTER, VALUE_CODE } from "@/modules/master-data/catalog";
+import { MASTER } from "@/modules/master-data/catalog";
 import { bodyDesignsOrLegacy, designNamesOf } from "@/modules/samples/bodies";
 import { tallyDesigns, type DesignTally } from "./designs";
 
@@ -11,16 +11,12 @@ export interface DashboardData {
     total: number;
     lab: number;
     line: number;
-    creative: number;
-    inspired: number;
     designs: DesignTally[];
   };
   overall: {
     totalSamples: number;
     lab: number;
     line: number;
-    creative: number;
-    inspired: number;
     designs: number;
     companies: number;
     rectification: number;
@@ -41,19 +37,17 @@ const bodySelect = {
 export async function getDashboard(): Promise<DashboardData> {
   const today = plantToday();
   const day = new Date(`${today}T00:00:00Z`);
-  const typeIs = (code: string) => ({ sampleType: { code } });
 
   const [
     todaySamples,
     todayInward,
     totalSamples,
-    creative,
-    inspired,
     rectification,
     companies,
     samplePatterns,
     inwardPatterns,
     plainUsed,
+    usedDesignNames,
     inwardNames,
     sampleNames,
     production,
@@ -63,20 +57,26 @@ export async function getDashboard(): Promise<DashboardData> {
       select: {
         numberOfBodies: true,
         designCategory: true,
-        designName: true,
-        sampleType: { select: { code: true } },
+        legacyDesignName: true,
+        designNameValue: { select: { label: true } },
         designPatterns: patternSelect,
         bodies: bodySelect,
       },
     }),
     prisma.inwardOutwardEntry.findMany({
       where: { entryDate: day },
-      select: { numberOfBodies: true, designCategory: true, sampleDesignName: true, designPatterns: patternSelect, bodies: bodySelect },
+      select: {
+        numberOfBodies: true,
+        designCategory: true,
+        legacySampleDesignName: true,
+        designNameValue: { select: { label: true } },
+        designPatterns: patternSelect,
+        bodies: bodySelect,
+      },
     }),
     prisma.labSample.count(),
-    prisma.labSample.count({ where: typeIs(VALUE_CODE.CREATIVE_SAMPLE) }),
-    prisma.labSample.count({ where: typeIs(VALUE_CODE.INSPIRED_SAMPLE) }),
-    prisma.labSample.count({ where: { physicalSamplePresent: false, ...typeIs(VALUE_CODE.INSPIRED_SAMPLE) } }),
+    // Physical Sample Available? = No — the Rectification list in Inward / Outward.
+    prisma.labSample.count({ where: { physicalSamplePresent: false } }),
     prisma.masterValue.count({ where: { isActive: true, category: { code: MASTER.COMPANY } } }),
     Promise.all([
       prisma.sampleDesignPattern.findMany({ distinct: ["patternId"], select: { pattern: { select: { label: true } } } }),
@@ -92,15 +92,24 @@ export async function getDashboard(): Promise<DashboardData> {
       prisma.inwardOutwardEntry.findFirst({ where: { designCategory: "PLAIN_BODY" }, select: { id: true } }),
       prisma.inwardBody.findFirst({ where: { designCategory: "PLAIN_BODY" }, select: { id: true } }),
     ]).then((xs) => xs.some(Boolean)),
+    // Design Names used by a lab sample or an Inward / Outward entry …
+    prisma.masterValue.findMany({
+      where: {
+        category: { code: MASTER.DESIGN_NAME },
+        OR: [{ samplesAsDesignName: { some: {} } }, { inwardsAsDesignName: { some: {} } }],
+      },
+      select: { label: true },
+    }),
+    // … and names typed before the Design Names list existed (not yet moved into it).
     prisma.inwardOutwardEntry.findMany({
-      where: { sampleDesignName: { not: null } },
-      distinct: ["sampleDesignName"],
-      select: { sampleDesignName: true },
+      where: { legacySampleDesignName: { not: null } },
+      distinct: ["legacySampleDesignName"],
+      select: { legacySampleDesignName: true },
     }),
     prisma.labSample.findMany({
-      where: { designName: { not: null } },
-      distinct: ["designName"],
-      select: { designName: true },
+      where: { legacyDesignName: { not: null } },
+      distinct: ["legacyDesignName"],
+      select: { legacyDesignName: true },
     }),
     prisma.productionSample.count(),
   ]);
@@ -116,16 +125,17 @@ export async function getDashboard(): Promise<DashboardData> {
       ),
     );
   const todayDesigns = tallyDesigns([
-    ...todaySamples.flatMap((s) => [...bodyDesigns(s), s.designName]),
-    ...todayInward.flatMap((e) => [...bodyDesigns(e), e.sampleDesignName]),
+    ...todaySamples.flatMap((s) => [...bodyDesigns(s), s.designNameValue?.label ?? s.legacyDesignName]),
+    ...todayInward.flatMap((e) => [...bodyDesigns(e), e.designNameValue?.label ?? e.legacySampleDesignName]),
   ]);
 
   const allDesigns = tallyDesigns([
     ...samplePatterns.map((p) => p.pattern.label),
     ...inwardPatterns.map((p) => p.pattern.label),
     ...(plainUsed ? ["Plain Body"] : []),
-    ...inwardNames.map((n) => n.sampleDesignName),
-    ...sampleNames.map((n) => n.designName),
+    ...usedDesignNames.map((v) => v.label),
+    ...inwardNames.map((n) => n.legacySampleDesignName),
+    ...sampleNames.map((n) => n.legacyDesignName),
   ]);
 
   const lab = todaySamples.length;
@@ -135,16 +145,12 @@ export async function getDashboard(): Promise<DashboardData> {
       total: lab + 0,
       lab,
       line: 0,
-      creative: todaySamples.filter((s) => s.sampleType?.code === VALUE_CODE.CREATIVE_SAMPLE).length,
-      inspired: todaySamples.filter((s) => s.sampleType?.code === VALUE_CODE.INSPIRED_SAMPLE).length,
       designs: todayDesigns,
     },
     overall: {
       totalSamples: totalSamples + 0,
       lab: totalSamples,
       line: 0,
-      creative,
-      inspired,
       designs: allDesigns.length,
       companies,
       rectification,

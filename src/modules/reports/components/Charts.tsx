@@ -94,7 +94,7 @@ export function ProductionChart({ data }: { data: ReportData }) {
   );
 }
 
-// ── Production Samples (received from the plant) ───────────────────────────
+// ── 3 · Production Samples (received from the plant) ───────────────────────
 
 export function ProductionSamplesChart({ data }: { data: ReportData }) {
   const max = Math.max(0, ...data.productionSamples.map((d) => d.count));
@@ -167,81 +167,6 @@ export function ProductionSamplesChart({ data }: { data: ReportData }) {
   );
 }
 
-// ── 3 · Creative vs Inspired ─────────────────────────────────────────────────
-
-export function CreativeInspiredChart({ data }: { data: ReportData }) {
-  const max = Math.max(0, ...data.creativeVsInspired.flatMap((d) => [d.creative, d.inspired]));
-  const domain = countDomain(max);
-  const series = [
-    { key: "creative", label: "Creative Samples", color: SERIES[0] },
-    { key: "inspired", label: "Inspired Samples", color: SERIES[1] },
-  ] as const;
-  return (
-    <ChartCard
-      title="Creative vs Inspired Samples"
-      description={`${data.totals.creative} creative · ${data.totals.inspired} inspired${data.totals.otherType ? ` · ${data.totals.otherType} other / no type` : ""}`}
-      empty={data.totals.creative + data.totals.inspired === 0 ? <EmptyChart>No Creative or Inspired samples in this period.</EmptyChart> : undefined}
-      chart={
-        <>
-          <Legend items={series.map((s) => ({ label: s.label, color: s.color }))} />
-          <div className="h-72" role="img" aria-label="Grouped bar chart of creative and inspired samples per date">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data.creativeVsInspired} margin={{ top: 8, right: 16, bottom: 4, left: -16 }} barGap={2} barCategoryGap="22%">
-                <CartesianGrid stroke={GRID} vertical={false} />
-                <XAxis dataKey="date" tickFormatter={shortDate} minTickGap={18} {...axisProps} />
-                <YAxis domain={domain} ticks={countTicks(domain[1])} allowDecimals={false} {...axisProps} />
-                <Tooltip
-                  cursor={{ fill: "rgba(31,58,95,0.06)" }}
-                  content={({ active, payload, label }) =>
-                    active && payload?.length ? (
-                      <TipBox
-                        title={longDate(String(label))}
-                        rows={series.map((s) => ({
-                          label: s.label,
-                          value: String(payload.find((p) => p.dataKey === s.key)?.value ?? 0),
-                          color: s.color,
-                        }))}
-                      />
-                    ) : null
-                  }
-                />
-                {series.map((s) => (
-                  <Bar key={s.key} dataKey={s.key} name={s.label} fill={s.color} radius={[4, 4, 0, 0]} maxBarSize={22} isAnimationActive={false} />
-                ))}
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </>
-      }
-      table={
-        <table className="w-full text-[14px]">
-          <thead>
-            <tr>
-              <th className="th">Date</th>
-              <th className="th text-right">Creative</th>
-              <th className="th text-right">Inspired</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.creativeVsInspired.map((d) => (
-              <tr key={d.date}>
-                <td className="td">{longDate(d.date)}</td>
-                <td className="td text-right tabular-nums">{d.creative}</td>
-                <td className="td text-right tabular-nums">{d.inspired}</td>
-              </tr>
-            ))}
-            <tr>
-              <td className="td font-bold">Total</td>
-              <td className="td text-right font-bold tabular-nums">{data.totals.creative}</td>
-              <td className="td text-right font-bold tabular-nums">{data.totals.inspired}</td>
-            </tr>
-          </tbody>
-        </table>
-      }
-    />
-  );
-}
-
 // ── 4 · Design analysis ──────────────────────────────────────────────────────
 
 export function DesignChart({ data }: { data: ReportData }) {
@@ -253,7 +178,7 @@ export function DesignChart({ data }: { data: ReportData }) {
       title="Design Analysis"
       description={
         <>
-          Samples per design pattern, highest first. A sample with several patterns counts once for each. Inspired samples use the design recorded in Inward / Outward.
+          Samples per design pattern, highest first. A sample with several patterns counts once for each. A sample without its own design uses the one recorded in Inward / Outward.
           {data.totals.withoutDesign > 0 && ` ${data.totals.withoutDesign} sample(s) have no design recorded yet.`}
         </>
       }

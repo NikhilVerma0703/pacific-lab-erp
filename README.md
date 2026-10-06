@@ -4,7 +4,11 @@ Laboratory / R&D sub-ERP: lab samples, their formulations, design, vein, L/a/b r
 
 **Live sections:** Dashboard (with the Forum), Sample Data Entry, Sample Inward / Outward (with Rectification), Production Sample, Reports, Downloads and Master Data.
 
-> **Updating an existing install:** after copying new code, run `npm install` and `npm run db:push` (applies new tables/columns), then `npm run db:seed` (adds any new master lists). Existing data is kept.
+> **Updating an existing install:** after copying new code, run `npm install` and `npm run db:push` (applies new tables/columns), then `npm run db:seed` (adds any new master lists, removes retired ones). Existing data is kept.
+>
+> *Sample Type removal (Creative / Inspired):* `db:push` will warn that it drops the `LabSample.sampleTypeId` column — answer **y** (or run `npx prisma db push --accept-data-loss`). Only that column goes; every sample and its other data stay. Then `npm run db:seed` deletes the retired *Sample Types* list.
+>
+> *Design Names list:* `db:push` adds the new `designNameId` columns (no data loss); `npm run db:seed` then moves every Design Name / Sample Design Name typed so far into the new **Design Names** list.
 
 Stack: Next.js 15 (App Router) · TypeScript · Tailwind CSS 4 · PostgreSQL · Prisma 6 · React Hook Form + Zod · Recharts · ExcelJS · Inngest.
 
@@ -70,7 +74,7 @@ Tablets on the plant network: `npm run build` then `npm start`, and open `http:/
 | `npm run dev` | Development server |
 | `npm run build` / `npm start` | Production build / server |
 | `npm run db:push` | Apply `prisma/schema.prisma` to the database |
-| `npm run db:seed` | Master lists + first admin (safe to re-run; never overwrites edits) |
+| `npm run db:seed` | Master lists + first admin; removes retired lists (safe to re-run; never overwrites edits) |
 | `npm run db:studio` | Browse the database |
 | `npm run typecheck` · `npm run lint` · `npm test` | Checks |
 | `npm run inngest:dev` | Run the scheduled background jobs locally (optional) |

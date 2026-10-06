@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { emptySampleBody, newSampleInput, sampleFormSchema } from "@/modules/samples/schema";
+import { nextAfterSave } from "@/modules/samples/next-step";
 
 const base = () => newSampleInput({ serialNo: 22, slabNumber: 4468, today: "2026-10-05" });
 const withBodies = (n: number) => ({ ...base(), numberOfBodies: String(n), bodies: Array.from({ length: n }, emptySampleBody) });
@@ -65,5 +66,38 @@ describe("physical sample present", () => {
     expect(sampleFormSchema.parse({ ...base(), physicalSamplePresent: "YES" }).physicalSamplePresent).toBe(true);
     expect(sampleFormSchema.parse({ ...base(), physicalSamplePresent: "NO" }).physicalSamplePresent).toBe(false);
     expect(sampleFormSchema.parse({ ...base(), physicalSamplePresent: "" }).physicalSamplePresent).toBe(null);
+  });
+});
+
+describe("after Save — Physical Sample Available?", () => {
+  const at = (over: Partial<Parameters<typeof nextAfterSave>[0]>) =>
+    nextAfterSave({ id: "s1", status: "SUBMITTED", physicalSampleAvailable: null, hasInwardEntry: false, ...over });
+  it("Yes opens Inward / Outward to enter the physical sample", () => {
+    expect(at({ physicalSampleAvailable: true })).toEqual({ url: "/inward-outward?sample=s1#entry", kind: "inward" });
+  });
+  it("Yes, already recorded in Inward / Outward → stays", () => {
+    expect(at({ physicalSampleAvailable: true, hasInwardEntry: true })).toBeNull();
+  });
+  it("No opens Inward / Outward with the sample under Rectification", () => {
+    expect(at({ physicalSampleAvailable: false })).toEqual({ url: "/inward-outward?rectification=s1#rectification", kind: "rectification" });
+    expect(at({ physicalSampleAvailable: false, hasInwardEntry: true })?.kind).toBe("rectification");
+  });
+  it("a draft (or no answer) stays", () => {
+    expect(at({ physicalSampleAvailable: true, status: "DRAFT" })).toBeNull();
+    expect(at({ physicalSampleAvailable: false, status: "DRAFT" })).toBeNull();
+    expect(at({})).toBeNull();
+  });
+});
+
+describe("Design Name (Design Names list)", () => {
+  it("is optional, takes a list value or a new name typed via Other…", () => {
+    expect(sampleFormSchema.parse(base()).designName).toBeNull();
+    expect(sampleFormSchema.parse({ ...base(), designName: { id: "d1", label: "Calacatta Gold" } }).designName).toEqual({ id: "d1", label: "Calacatta Gold" });
+    expect(sampleFormSchema.parse({ ...base(), designName: { label: "Statuario Nuvo", save: true } }).designName).toEqual({ label: "Statuario Nuvo", save: true });
+  });
+  it("rejects a name too long to be a list value", () => {
+    const r = sampleFormSchema.safeParse({ ...base(), designName: { label: "x".repeat(81) } });
+    expect(r.success).toBe(false);
+    expect(r.error?.issues[0].path).toEqual(["designName", "label"]);
   });
 });

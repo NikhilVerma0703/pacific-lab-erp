@@ -7,13 +7,13 @@
  * server-only imports.
  */
 export const MASTER = {
-  SAMPLE_TYPE: "SAMPLE_TYPE",
   RESIN: "RESIN",
   GRIT: "GRIT",
   GRIT_SIZE: "GRIT_SIZE",
   FILLER: "FILLER",
   PIGMENT: "PIGMENT",
   DESIGN_PATTERN: "DESIGN_PATTERN",
+  DESIGN_NAME: "DESIGN_NAME",
   MIXER_TYPE: "MIXER_TYPE",
   VEIN_METHOD: "VEIN_METHOD",
   COMPANY: "COMPANY",
@@ -23,28 +23,29 @@ export type MasterCode = (typeof MASTER)[keyof typeof MASTER];
 
 /** Value codes with behaviour attached. */
 export const VALUE_CODE = {
-  CREATIVE_SAMPLE: "CREATIVE",
-  INSPIRED_SAMPLE: "INSPIRED",
   ROY_BODY: "ROY_BODY",
 } as const;
+
+/**
+ * Lists the ERP no longer uses. Hidden from Master Data; the seed script
+ * removes them once nothing refers to them. (Sample Types — Creative /
+ * Inspired — were retired when Sample Type was removed from Sample Data Entry.)
+ */
+export const RETIRED_CATEGORY_CODES = ["SAMPLE_TYPE"] as const;
 
 export interface CatalogEntry {
   code: MasterCode;
   name: string;
   description: string;
   values: Array<{ label: string; code?: string }>;
+  /** Position in Master Data; defaults to the entry's place in CATALOG. */
+  sortOrder?: number;
 }
 
+/** Where a list sits in Master Data. */
+export const catalogSortOrder = (entry: CatalogEntry, index: number) => entry.sortOrder ?? (index + 1) * 10;
+
 export const CATALOG: CatalogEntry[] = [
-  {
-    code: MASTER.SAMPLE_TYPE,
-    name: "Sample Types",
-    description: "Creative, Inspired, and any sample type added later.",
-    values: [
-      { label: "Creative Sample", code: VALUE_CODE.CREATIVE_SAMPLE },
-      { label: "Inspired Sample", code: VALUE_CODE.INSPIRED_SAMPLE },
-    ],
-  },
   {
     code: MASTER.RESIN,
     name: "Resins",
@@ -91,6 +92,14 @@ export const CATALOG: CatalogEntry[] = [
       { label: "CHESSBOARD" },
       { label: "ROY BODY", code: VALUE_CODE.ROY_BODY },
     ],
+  },
+  {
+    code: MASTER.DESIGN_NAME,
+    name: "Design Names",
+    description: "Design names used in Sample Data Entry, Production Sample and Inward / Outward. Grows with use.",
+    values: [],
+    // Right after Design Patterns, also on installs that already have the other lists.
+    sortOrder: 65,
   },
   {
     code: MASTER.MIXER_TYPE,

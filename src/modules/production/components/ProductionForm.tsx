@@ -4,7 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { RotateCcw, Save, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { FormProvider, useForm, type Resolver } from "react-hook-form";
+import { Controller, FormProvider, useForm, type Resolver } from "react-hook-form";
 import { toast } from "sonner";
 import { DesignFields } from "@/components/lab/DesignFields";
 import { errorAt, SampleFormContext } from "@/components/lab/form-context";
@@ -13,7 +13,9 @@ import { RoyBodyLabFields } from "@/components/lab/RoyBodyLabFields";
 import { ConfirmDialog } from "@/components/ui/Dialog";
 import { Field } from "@/components/ui/Field";
 import { FormSection } from "@/components/ui/FormSection";
+import { MasterPicker } from "@/components/ui/MasterPicker";
 import { cn } from "@/lib/utils";
+import { MASTER } from "@/modules/master-data/catalog";
 import type { MasterOptions } from "@/modules/master-data/types";
 import { AttachmentsField } from "@/modules/samples/components/AttachmentsField";
 import { BodyLabFields, BodyPart, BodySections } from "@/components/lab/BodySections";
@@ -63,7 +65,7 @@ export function ProductionForm({
     defaultValues: defaults,
     mode: "onBlur",
   });
-  const { register, handleSubmit, getValues, reset, setError, formState } = methods;
+  const { control, register, handleSubmit, getValues, reset, setError, formState } = methods;
   const errors = formState.errors;
 
   // One complete Body section per body, preserving what was typed.
@@ -173,8 +175,23 @@ export function ProductionForm({
               <Field label="Slab Number" htmlFor="ps-slabNumber" error={errorAt(errors, "slabNumber")}>
                 {numberInput("slabNumber", "ps-slabNumber")}
               </Field>
-              <Field label="Design Name" htmlFor="ps-designName" error={errorAt(errors, "designName")}>
-                <input id="ps-designName" className={cn("input", errorAt(errors, "designName") && "input-error")} autoComplete="off" {...register("designName")} />
+              <Field label="Design Name" htmlFor="ps-designName" error={errorAt(errors, "designName.label") ?? errorAt(errors, "designName")}>
+                <Controller
+                  control={control}
+                  name="designName"
+                  render={({ field }) => (
+                    <MasterPicker
+                      id="ps-designName"
+                      options={options[MASTER.DESIGN_NAME]}
+                      value={field.value ?? null}
+                      onChange={field.onChange}
+                      allowCustom={permissions.addMaster}
+                      invalid={!!(errorAt(errors, "designName.label") ?? errorAt(errors, "designName"))}
+                      noun="design name"
+                      placeholder="Select or type design name"
+                    />
+                  )}
+                />
               </Field>
               <Field label="Number of Bodies (n)" htmlFor="ps-bodies" error={errorAt(errors, "numberOfBodies")}>
                 <input

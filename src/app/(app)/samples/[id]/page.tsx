@@ -25,7 +25,7 @@ export default async function SampleDetailPage({ params }: { params: Promise<{ i
     <>
       <PageHeader
         title={`Sample S.No. ${s.serialNo}`}
-        description={`${s.slabNumber ? `Slab ${s.slabNumber} · ` : ""}${formatDate(s.sampleDate)}${s.sampleType ? ` · ${s.sampleType.label}` : ""}`}
+        description={`${s.slabNumber ? `Slab ${s.slabNumber} · ` : ""}${formatDate(s.sampleDate)}${s.designName ? ` · ${s.designName}` : ""}`}
         actions={
           <>
             <Link href="/samples" className="btn-secondary">

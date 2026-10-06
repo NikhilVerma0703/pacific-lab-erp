@@ -36,7 +36,10 @@ export interface ProductionDetail {
   serialNo: number;
   slabNumber: number | null;
   sampleDate: string;
+  /** Design Name as shown (the list value, or a name typed before the list existed). */
   designName: string | null;
+  /** The Design Names list value (null for a name typed before the list existed). */
+  designNameRef: ValueDTO | null;
   numberOfBodies: number | null;
   /** Body 1 … n. */
   bodies: ProductionBodyDTO[];
@@ -110,7 +113,8 @@ export function toProductionDetail(s: WithAll): ProductionDetail {
     serialNo: s.serialNo,
     slabNumber: s.slabNumber,
     sampleDate: s.sampleDate.toISOString().slice(0, 10),
-    designName: s.designName,
+    designName: s.designNameValue?.label ?? s.legacyDesignName,
+    designNameRef: s.designNameValue,
     numberOfBodies: s.numberOfBodies,
     bodies,
     legacyBodies: legacy,
@@ -135,7 +139,9 @@ export async function getProductionDetail(id: string): Promise<ProductionDetail 
 }
 
 /** Master values the entry points at (so disabled ones still show when editing). */
-export const productionValueIds = (d: ProductionDetail) => [...new Set(d.bodies.flatMap((b) => b.designPatterns.map((p) => p.id)))];
+export const productionValueIds = (d: ProductionDetail) => [
+  ...new Set([...(d.designNameRef ? [d.designNameRef.id] : []), ...d.bodies.flatMap((b) => b.designPatterns.map((p) => p.id))]),
+];
 
 // ── form prefill ─────────────────────────────────────────────────────────────
 
@@ -154,7 +160,8 @@ export function toProductionFormInput(d: ProductionDetail): ProductionFormInput 
     sampleDate: d.sampleDate,
     serialNo: String(d.serialNo),
     slabNumber: d.slabNumber === null ? "" : String(d.slabNumber),
-    designName: d.designName ?? "",
+    // A name typed before the Design Names list existed opens as a new (Other…) name.
+    designName: d.designNameRef ? ref(d.designNameRef) : d.designName ? { label: d.designName } : null,
     numberOfBodies: d.numberOfBodies !== null ? String(d.numberOfBodies) : d.bodies.length ? String(d.bodies.length) : "",
     bodies: d.bodies.map((b) => {
       const rn = b.royBody?.numberOfBodies ?? 0;

@@ -108,7 +108,6 @@ model MasterValue {
   createdBy User?          @relation("MasterValueCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
   // Reverse relations — they are what makes a value "in use".
-  samplesAsType             LabSample[]                   @relation("SampleType")
   samplesAsMixer            LabSample[]                   @relation("SampleMixerType")
   componentsAsMaterial      FormulationComponent[]        @relation("ComponentMaterial")
   componentsAsSize          FormulationComponent[]        @relation("ComponentSize")
@@ -124,6 +123,9 @@ model MasterValue {
   bodyVeinMethodUses        SampleBodyVeinMethod[]
   inwardBodyPatternUses     InwardBodyDesignPattern[]
   productionBodyPatternUses ProductionBodyDesignPattern[]
+  samplesAsDesignName       LabSample[]                   @relation("SampleDesignName")
+  inwardsAsDesignName       InwardOutwardEntry[]          @relation("InwardDesignName")
+  productionsAsDesignName   ProductionSample[]            @relation("ProductionDesignName")
 
   @@unique([categoryId, normalizedKey])
   @@unique([categoryId, code])
@@ -158,17 +160,19 @@ model LabSample {
   slabNumber            Int?            @unique
   sampleDate            DateTime        @db.Date
   status                SampleStatus    @default(SUBMITTED)
-  sampleTypeId          String?
-  /// Free-text design name (e.g. "Calacatta Gold").
-  designName            String?
+  /// Design Name — a value of the Design Names master list.
+  designNameId          String?
+  /// Design Name typed as free text before it became a master list. `npm run
+  /// db:seed` moves it into the list (and saving the sample does too).
+  legacyDesignName      String?         @map("designName")
   numberOfBodies        Int?
   designCategory        DesignCategory?
   mixerTypeId           String?
   hasVein               Boolean?
   veinNotes             String?
   remarks               String?
-  /// Inspired samples only: is the physical sample in the lab?
-  /// Yes → recorded in Inward / Outward. No → listed under Rectification.
+  /// Physical Sample Available? Yes → recorded in Inward / Outward;
+  /// No → listed under Rectification in Inward / Outward.
   physicalSamplePresent Boolean?
 
   createdById String?
@@ -176,10 +180,10 @@ model LabSample {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  sampleType MasterValue? @relation("SampleType", fields: [sampleTypeId], references: [id], onDelete: Restrict)
-  mixerType  MasterValue? @relation("SampleMixerType", fields: [mixerTypeId], references: [id], onDelete: Restrict)
-  createdBy  User?        @relation("SampleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy  User?        @relation("SampleUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  mixerType       MasterValue? @relation("SampleMixerType", fields: [mixerTypeId], references: [id], onDelete: Restrict)
+  designNameValue MasterValue? @relation("SampleDesignName", fields: [designNameId], references: [id], onDelete: Restrict)
+  createdBy       User?        @relation("SampleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy       User?        @relation("SampleUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 
   formulations   Formulation[]
   designPatterns SampleDesignPattern[]
@@ -194,9 +198,9 @@ model LabSample {
 
   @@index([sampleDate])
   @@index([status])
-  @@index([sampleTypeId])
   @@index([createdAt])
   @@index([physicalSamplePresent])
+  @@index([designNameId])
 }
 
 /// Which body of the sample a formulation describes. One reusable structure
@@ -426,29 +430,34 @@ model SampleAttachment {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// A physical sample received from (or sent to) a company. When it started as
-/// an Inspired lab sample, `labSampleId` links the two.
+/// a lab sample (Physical Sample Available? = Yes), `labSampleId` links the two.
 model InwardOutwardEntry {
-  id                 String          @id @default(cuid())
+  id                     String          @id @default(cuid())
   /// Serial number — sequential, unique, assigned by the server.
-  serialNo           Int             @unique
+  serialNo               Int             @unique
   /// The entry's date (defaults to the day it is recorded; can be changed).
-  entryDate          DateTime        @default(now()) @db.Date
-  labSampleId        String?         @unique
-  companyId          String?
-  sampleDesignName   String?
-  numberOfBodies     Int?
-  designCategory     DesignCategory?
-  recreationAttempts String?
+  entryDate              DateTime        @default(now()) @db.Date
+  labSampleId            String?         @unique
+  companyId              String?
+  /// Sample Design Name — a value of the Design Names master list.
+  designNameId           String?
+  /// Sample Design Name typed as free text before it became a master list
+  /// (moved into the list by `npm run db:seed` or the next save).
+  legacySampleDesignName String?         @map("sampleDesignName")
+  numberOfBodies         Int?
+  designCategory         DesignCategory?
+  recreationAttempts     String?
 
   createdById String?
   updatedById String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  labSample LabSample?   @relation(fields: [labSampleId], references: [id], onDelete: SetNull)
-  company   MasterValue? @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  createdBy User?        @relation("InwardCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy User?        @relation("InwardUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  labSample       LabSample?   @relation(fields: [labSampleId], references: [id], onDelete: SetNull)
+  company         MasterValue? @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  designNameValue MasterValue? @relation("InwardDesignName", fields: [designNameId], references: [id], onDelete: Restrict)
+  createdBy       User?        @relation("InwardCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy       User?        @relation("InwardUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 
   designPatterns InwardDesignPattern[]
   measurements   InwardMeasurement[]
@@ -459,6 +468,7 @@ model InwardOutwardEntry {
   bodies         InwardBody[]
 
   @@index([companyId])
+  @@index([designNameId])
   @@index([entryDate])
   @@index([createdAt])
 }
@@ -527,7 +537,11 @@ model ProductionSample {
   /// Slab number — suggested as the next free number, unique when present.
   slabNumber        Int?            @unique
   sampleDate        DateTime        @db.Date
-  designName        String?
+  /// Design Name — a value of the Design Names master list.
+  designNameId      String?
+  /// Design Name typed as free text before it became a master list (moved
+  /// into the list by `npm run db:seed` or the next save).
+  legacyDesignName  String?         @map("designName")
   numberOfBodies    Int?
   designCategory    DesignCategory?
   /// Roy Body (opened when ROY BODY is one of the design patterns): its own
@@ -540,8 +554,9 @@ model ProductionSample {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  createdBy User? @relation("ProductionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy User? @relation("ProductionUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  designNameValue MasterValue? @relation("ProductionDesignName", fields: [designNameId], references: [id], onDelete: Restrict)
+  createdBy       User?        @relation("ProductionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy       User?        @relation("ProductionUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 
   designPatterns ProductionDesignPattern[]
   measurements   ProductionMeasurement[]
@@ -552,6 +567,7 @@ model ProductionSample {
 
   @@index([sampleDate])
   @@index([createdAt])
+  @@index([designNameId])
 }
 
 model ProductionDesignPattern {

@@ -78,12 +78,13 @@ export async function saveProductionSample(args: {
           : null;
         if (id && !existing) throw new ProductionSaveError("This entry no longer exists — it may have been deleted.");
 
-        const resolve = async (ref: MasterRef | null | undefined) => {
+        const resolveIn = async (code: typeof MASTER.DESIGN_PATTERN | typeof MASTER.DESIGN_NAME, ref: MasterRef | null | undefined) => {
           if (ref && !ref.id && ref.label.trim() && !canAddMaster) {
             throw new ProductionSaveError(`You cannot add new list values (“${ref.label}”). Pick one from the list.`);
           }
-          return resolveMasterRef(tx, MASTER.DESIGN_PATTERN, ref, user.id);
+          return resolveMasterRef(tx, code, ref, user.id);
         };
+        const resolve = (ref: MasterRef | null | undefined) => resolveIn(MASTER.DESIGN_PATTERN, ref);
 
         // ── numbers ──────────────────────────────────────────────────────────
         let serialNo: number;
@@ -119,7 +120,9 @@ export async function saveProductionSample(args: {
           serialNo,
           slabNumber,
           sampleDate,
-          designName: data.designName,
+          designNameId: await resolveIn(MASTER.DESIGN_NAME, data.designName),
+          // Moved into the Design Names list by this save.
+          legacyDesignName: null,
           numberOfBodies: data.numberOfBodies,
           // Design now lives on each body (ProductionBody); the entry-level
           // columns only remain for entries saved before bodies existed.
@@ -245,6 +248,7 @@ export async function deleteProductionSample(id: string, user: CurrentUser): Pro
 }
 
 export const productionInclude = {
+  designNameValue: { select: { id: true, label: true, code: true, isActive: true } },
   createdBy: { select: { name: true } },
   updatedBy: { select: { name: true } },
   designPatterns: {

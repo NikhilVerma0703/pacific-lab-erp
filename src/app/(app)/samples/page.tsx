@@ -25,7 +25,7 @@ export default async function SamplesPage() {
     <>
       <PageHeader
         title="Sample Data Entry"
-        description="Record a new laboratory sample — its formulation, design, vein, L/a/b readings and output. Every field is optional."
+        description="Record a new laboratory sample — its formulation, design, vein, L/a/b readings and output. Every field is optional except “Physical Sample Available?”, which Save needs."
       />
       {canCreate ? (
         <SampleForm

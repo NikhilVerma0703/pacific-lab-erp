@@ -63,7 +63,8 @@ export const productionFormSchema = z
       }),
     serialNo: optionalNumber({ min: 1, max: 99_999_999, int: true, label: "S. No." }),
     slabNumber: optionalNumber({ min: 1, max: 999_999_999, int: true, label: "Slab Number" }),
-    designName: optionalText(200),
+    /** Design Name — from the Design Names list, or a new name typed via Other…. */
+    designName: masterRefSchema.nullable(),
     numberOfBodies: optionalNumber({ min: 1, max: MAX_BODIES, int: true, label: "Number of Bodies" }),
     /** Body 1 … n — one section per body. */
     bodies: z.array(productionBodySchema).max(MAX_BODIES),
@@ -100,7 +101,7 @@ export function newProductionInput(args: { serialNo: number; slabNumber: number;
     sampleDate: args.today,
     serialNo: String(args.serialNo),
     slabNumber: String(args.slabNumber),
-    designName: "",
+    designName: null,
     numberOfBodies: "",
     bodies: [],
     attachmentIds: [],

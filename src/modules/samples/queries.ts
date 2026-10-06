@@ -91,10 +91,13 @@ export interface SampleDetail {
   slabNumber: number | null;
   sampleDate: string;
   status: "DRAFT" | "SUBMITTED";
-  sampleType: ValueDTO | null;
+  /** Design Name as shown (the list value, or a name typed before the list existed). */
   designName: string | null;
+  /** The Design Names list value (null for a name typed before the list existed). */
+  designNameRef: ValueDTO | null;
+  /** Physical Sample Available? */
   physicalSamplePresent: boolean | null;
-  /** The Inward / Outward entry recorded for this (Inspired) sample, if any. */
+  /** The Inward / Outward entry recorded for this sample, if any. */
   inwardEntry: { id: string; serialNo: number } | null;
   numberOfBodies: number | null;
   /** Body 1 … n. */
@@ -212,8 +215,8 @@ export function toDetail(s: SampleWithAll): SampleDetail {
     slabNumber: s.slabNumber,
     sampleDate: s.sampleDate.toISOString().slice(0, 10),
     status: s.status,
-    sampleType: s.sampleType,
-    designName: s.designName,
+    designName: s.designNameValue?.label ?? s.legacyDesignName,
+    designNameRef: s.designNameValue,
     physicalSamplePresent: s.physicalSamplePresent,
     inwardEntry: s.inwardEntry,
     numberOfBodies: s.numberOfBodies,
@@ -243,6 +246,7 @@ export async function getSampleDetail(id: string): Promise<SampleDetail | null> 
 export function referencedValueIds(d: SampleDetail): string[] {
   const ids = new Set<string>();
   const add = (v: ValueDTO | null | undefined) => v && ids.add(v.id);
+  add(d.designNameRef);
   const addF = (f: FormulationDTO | null) => {
     if (!f) return;
     f.components.forEach((c) => (add(c.material), add(c.size)));
@@ -250,7 +254,6 @@ export function referencedValueIds(d: SampleDetail): string[] {
     add(f.mixerType);
     f.veinMethods.forEach(add);
   };
-  add(d.sampleType);
   for (const b of d.bodies) {
     addF(b.main);
     addF(b.designRoyBody);
@@ -339,8 +342,8 @@ export function toFormInput(d: SampleDetail): SampleFormInput {
     serialNo: String(d.serialNo),
     slabNumber: d.slabNumber === null ? "" : String(d.slabNumber),
     sampleDate: d.sampleDate,
-    sampleType: ref(d.sampleType),
-    designName: d.designName ?? "",
+    // A name typed before the Design Names list existed opens as a new (Other…) name.
+    designName: ref(d.designNameRef) ?? (d.designName ? { label: d.designName } : null),
     physicalSamplePresent: d.physicalSamplePresent === null ? "" : d.physicalSamplePresent ? "YES" : "NO",
     // A pre-body sample with a blank n but recorded details opens with its one body.
     numberOfBodies: d.numberOfBodies !== null ? String(d.numberOfBodies) : d.bodies.length ? String(d.bodies.length) : "",
@@ -358,7 +361,6 @@ export interface RecentRow {
   slabNumber: number | null;
   sampleDate: string;
   status: "DRAFT" | "SUBMITTED";
-  sampleType: string | null;
   design: string;
   mixerType: string | null;
   vein: string;
@@ -387,7 +389,6 @@ export async function getRecentSamples(take = 10): Promise<RecentRow[]> {
       status: true,
       numberOfBodies: true,
       designCategory: true,
-      sampleType: { select: { label: true } },
       mixerType: { select: { label: true } },
       designPatterns: { select: { pattern: { select: { label: true } } }, orderBy: { sortOrder: "asc" } },
       veinMethods: { select: { method: { select: { label: true } } }, orderBy: { sortOrder: "asc" } },
@@ -408,7 +409,6 @@ export async function getRecentSamples(take = 10): Promise<RecentRow[]> {
       slabNumber: r.slabNumber,
       sampleDate: r.sampleDate.toISOString().slice(0, 10),
       status: r.status,
-      sampleType: r.sampleType?.label ?? null,
       design: bodiesDesignText(designs),
       mixerType: unionLabels(mixers).join(", ") || null,
       vein: unionLabels(veins).join(", "),

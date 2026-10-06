@@ -9,7 +9,6 @@ import { parseRange, REPORT_RANGES } from "@/modules/reports/build";
 import { getReport } from "@/modules/reports/queries";
 import {
   ConsumptionChart,
-  CreativeInspiredChart,
   DesignChart,
   ProductionChart,
   ProductionSamplesChart,
@@ -27,8 +26,6 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
 
   const kpis = [
     { label: "Samples created", value: data.totals.samples },
-    { label: "Creative", value: data.totals.creative },
-    { label: "Inspired", value: data.totals.inspired },
     { label: "Days with samples", value: `${activeDays} / ${days}` },
     { label: "Production samples", value: data.totals.productionSamples },
   ];
@@ -63,9 +60,9 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         </p>
       </div>
 
-      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="mb-5 grid grid-cols-3 gap-2 sm:gap-3">
         {kpis.map((k) => (
-          <div key={k.label} className="card px-4 py-3">
+          <div key={k.label} className="card px-3 py-3 sm:px-4">
             <p className="text-[12px] font-semibold tracking-wide text-ink-3 uppercase">{k.label}</p>
             <p className="mt-1 text-2xl font-bold tracking-tight tabular-nums">{k.value}</p>
           </div>
@@ -74,10 +71,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
 
       <div className="grid gap-5 xl:grid-cols-2">
         <ProductionChart data={data} />
-        <CreativeInspiredChart data={data} />
-        <div className="xl:col-span-2">
-          <ProductionSamplesChart data={data} />
-        </div>
+        <ProductionSamplesChart data={data} />
         <div className="xl:col-span-2">
           <DesignChart data={data} />
         </div>
@@ -85,7 +79,6 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           <ConsumptionChart data={data} />
         </div>
       </div>
-
     </>
   );
 }

@@ -47,10 +47,11 @@ export const inwardFormSchema = z
         return s;
       }),
     serialNo: optionalNumber({ min: 1, max: 99_999_999, int: true, label: "Serial Number" }),
-    /** The Inspired lab sample this physical sample belongs to, if any. */
+    /** The lab sample this physical sample belongs to, if any. */
     labSampleId: z.string().nullable().optional().transform((v) => v || null),
     company: masterRefSchema.nullable(),
-    sampleDesignName: optionalText(200),
+    /** Sample Design Name — from the Design Names list, or a new name typed via Other…. */
+    sampleDesignName: masterRefSchema.nullable(),
     numberOfBodies: optionalNumber({ min: 1, max: MAX_BODIES, int: true, label: "Number of Bodies" }),
     /** Body 1 … n — one section per body. */
     bodies: z.array(inwardBodySchema).max(MAX_BODIES),
@@ -79,7 +80,7 @@ export function newInwardInput(args: { serialNo: number; today: string; labSampl
     serialNo: String(args.serialNo),
     labSampleId: args.labSampleId ?? null,
     company: null,
-    sampleDesignName: "",
+    sampleDesignName: null,
     numberOfBodies: "",
     bodies: [],
     recreationAttempts: "",

@@ -50,8 +50,10 @@ export async function saveSample(args: {
   serialNo: number;
   slabNumber: number | null;
   removedKeys: string[];
-  /** Inspired + physical sample present + not yet recorded in Inward / Outward. */
-  needsInward: boolean;
+  /** Physical Sample Available? — Yes → Inward / Outward entry, No → Rectification, null → not answered. */
+  physicalSampleAvailable: boolean | null;
+  /** Its physical sample is already recorded in an Inward / Outward entry. */
+  hasInwardEntry: boolean;
 }> {
   const { id, data, status, user, autoSerial, autoSlab } = args;
   const canOverride = can(user, "sample.overrideNumbers");
@@ -110,20 +112,15 @@ export async function saveSample(args: {
           ? existing.sampleDate
           : dateOnly(todayInPlant());
 
-      // ── sample type decides which parts of the form apply ─────────────────
-      const sampleTypeId = await resolve(MASTER.SAMPLE_TYPE, data.sampleType);
-      const typeCodes = await codesOf(tx, sampleTypeId ? [sampleTypeId] : []);
-      const isCreative = typeCodes.has(VALUE_CODE.CREATIVE_SAMPLE);
-      const isInspired = typeCodes.has(VALUE_CODE.INSPIRED_SAMPLE);
-
       const base = {
         serialNo,
         slabNumber,
         sampleDate,
         status,
-        sampleTypeId,
-        designName: data.designName,
-        numberOfBodies: isCreative ? data.numberOfBodies : null,
+        designNameId: await resolve(MASTER.DESIGN_NAME, data.designName),
+        // Moved into the Design Names list by this save.
+        legacyDesignName: null,
+        numberOfBodies: data.numberOfBodies,
         // Design and Vein now live on each body (SampleBody). The sample-level
         // columns only remain for samples saved before bodies existed.
         designCategory: null,
@@ -131,7 +128,7 @@ export async function saveSample(args: {
         hasVein: null,
         veinNotes: null,
         remarks: data.remarks,
-        physicalSamplePresent: isInspired ? data.physicalSamplePresent : null,
+        physicalSamplePresent: data.physicalSamplePresent,
         updatedById: user.id,
       };
 
@@ -147,71 +144,69 @@ export async function saveSample(args: {
         await tx.sampleBody.deleteMany({ where: { sampleId: sample.id } });
       }
 
-      if (isCreative) {
-        // Body 1 … n — each body on its own: Material Choices, Design, Vein, L/a/b.
-        const n = data.numberOfBodies ?? 0;
-        const labRows: Prisma.LabMeasurementCreateManyInput[] = [];
-        for (const [i, body] of data.bodies.slice(0, n).entries()) {
-          const bodyIndex = i + 1;
-          const veinApplies = body.hasVein !== false;
-          const row = await tx.sampleBody.create({
-            data: {
-              sampleId: sample.id,
-              bodyIndex,
-              designCategory: body.designCategory,
-              mixerTypeId: await resolve(MASTER.MIXER_TYPE, body.mixerType),
-              hasVein: body.hasVein,
-              veinNotes: veinApplies ? body.veinNotes : null,
-            },
-          });
+      // Body 1 … n — each body on its own: Material Choices, Design, Vein, L/a/b.
+      const n = data.numberOfBodies ?? 0;
+      const labRows: Prisma.LabMeasurementCreateManyInput[] = [];
+      for (const [i, body] of data.bodies.slice(0, n).entries()) {
+        const bodyIndex = i + 1;
+        const veinApplies = body.hasVein !== false;
+        const row = await tx.sampleBody.create({
+          data: {
+            sampleId: sample.id,
+            bodyIndex,
+            designCategory: body.designCategory,
+            mixerTypeId: await resolve(MASTER.MIXER_TYPE, body.mixerType),
+            hasVein: body.hasVein,
+            veinNotes: veinApplies ? body.veinNotes : null,
+          },
+        });
 
-          await writeFormulation(tx, { sampleId: sample.id }, "MAIN_BODY", body.main, resolve, bodyIndex);
+        await writeFormulation(tx, { sampleId: sample.id }, "MAIN_BODY", body.main, resolve, bodyIndex);
 
-          // Design
-          if (body.designCategory === "NON_PLAIN_BODY") {
-            const patternIds: string[] = [];
-            for (const ref of body.designPatterns) {
-              const pid = await resolve(MASTER.DESIGN_PATTERN, ref);
-              if (pid && !patternIds.includes(pid)) patternIds.push(pid);
-            }
-            if (patternIds.length) {
-              await tx.sampleBodyDesignPattern.createMany({
-                data: patternIds.map((patternId, k) => ({ bodyId: row.id, patternId, sortOrder: k })),
-              });
-            }
-            if ((await codesOf(tx, patternIds)).has(VALUE_CODE.ROY_BODY)) {
-              await writeRoyBody(tx, { sampleId: sample.id }, "DESIGN_ROY_BODY", body.designRoyBody, resolve, bodyIndex);
-            }
+        // Design
+        if (body.designCategory === "NON_PLAIN_BODY") {
+          const patternIds: string[] = [];
+          for (const ref of body.designPatterns) {
+            const pid = await resolve(MASTER.DESIGN_PATTERN, ref);
+            if (pid && !patternIds.includes(pid)) patternIds.push(pid);
           }
-
-          // Vein
-          if (veinApplies) {
-            const methodIds: string[] = [];
-            for (const ref of body.veinMethods) {
-              const mid = await resolve(MASTER.VEIN_METHOD, ref);
-              if (mid && !methodIds.includes(mid)) methodIds.push(mid);
-            }
-            if (methodIds.length) {
-              await tx.sampleBodyVeinMethod.createMany({
-                data: methodIds.map((methodId, k) => ({ bodyId: row.id, methodId, sortOrder: k })),
-              });
-            }
-            if ((await codesOf(tx, methodIds)).has(VALUE_CODE.ROY_BODY)) {
-              await writeFormulation(tx, { sampleId: sample.id }, "VEIN_ROY_BODY", body.veinRoyBody, resolve, bodyIndex);
-            }
+          if (patternIds.length) {
+            await tx.sampleBodyDesignPattern.createMany({
+              data: patternIds.map((patternId, k) => ({ bodyId: row.id, patternId, sortOrder: k })),
+            });
           }
-
-          // This body's L / a / b — only where something was measured.
-          for (const [stage, r] of [
-            ["POST_PRESS", body.postPress],
-            ["POST_POLISH", body.postPolish],
-          ] as const) {
-            if (r.l === null && r.a === null && r.b === null) continue;
-            labRows.push({ sampleId: sample.id, stage, bodyIndex, l: r.l, a: r.a, b: r.b });
+          if ((await codesOf(tx, patternIds)).has(VALUE_CODE.ROY_BODY)) {
+            await writeRoyBody(tx, { sampleId: sample.id }, "DESIGN_ROY_BODY", body.designRoyBody, resolve, bodyIndex);
           }
         }
-        if (labRows.length) await tx.labMeasurement.createMany({ data: labRows });
+
+        // Vein
+        if (veinApplies) {
+          const methodIds: string[] = [];
+          for (const ref of body.veinMethods) {
+            const mid = await resolve(MASTER.VEIN_METHOD, ref);
+            if (mid && !methodIds.includes(mid)) methodIds.push(mid);
+          }
+          if (methodIds.length) {
+            await tx.sampleBodyVeinMethod.createMany({
+              data: methodIds.map((methodId, k) => ({ bodyId: row.id, methodId, sortOrder: k })),
+            });
+          }
+          if ((await codesOf(tx, methodIds)).has(VALUE_CODE.ROY_BODY)) {
+            await writeFormulation(tx, { sampleId: sample.id }, "VEIN_ROY_BODY", body.veinRoyBody, resolve, bodyIndex);
+          }
+        }
+
+        // This body's L / a / b — only where something was measured.
+        for (const [stage, r] of [
+          ["POST_PRESS", body.postPress],
+          ["POST_POLISH", body.postPolish],
+        ] as const) {
+          if (r.l === null && r.a === null && r.b === null) continue;
+          labRows.push({ sampleId: sample.id, stage, bodyIndex, l: r.l, a: r.a, b: r.b });
+        }
       }
+      if (labRows.length) await tx.labMeasurement.createMany({ data: labRows });
 
       // ── attachments ────────────────────────────────────────────────────────
       const wanted = new Set(data.attachmentIds);
@@ -243,12 +238,14 @@ export async function saveSample(args: {
         userId: user.id,
       });
 
-      const needsInward =
-        isInspired &&
-        data.physicalSamplePresent === true &&
-        !(await tx.inwardOutwardEntry.findUnique({ where: { labSampleId: sample.id }, select: { id: true } }));
-
-      return { id: sample.id, serialNo, slabNumber, removedKeys: toRemove.map((a) => a.storageKey), needsInward };
+      return {
+        id: sample.id,
+        serialNo,
+        slabNumber,
+        removedKeys: toRemove.map((a) => a.storageKey),
+        physicalSampleAvailable: data.physicalSamplePresent,
+        hasInwardEntry: !!(await tx.inwardOutwardEntry.findFirst({ where: { labSampleId: sample.id }, select: { id: true } })),
+      };
     },
     { timeout: 20_000, maxWait: 10_000 },
   ).catch((e) => {
@@ -284,8 +281,8 @@ export async function deleteSample(id: string, user: CurrentUser): Promise<{ ser
 }
 
 export const sampleInclude = {
-  sampleType: { select: { id: true, label: true, code: true, isActive: true } },
   mixerType: { select: { id: true, label: true, code: true, isActive: true } },
+  designNameValue: { select: { id: true, label: true, code: true, isActive: true } },
   createdBy: { select: { name: true } },
   updatedBy: { select: { name: true } },
   formulations: { include: formulationInclude },

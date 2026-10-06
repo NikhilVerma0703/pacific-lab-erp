@@ -11,10 +11,10 @@ import { Field } from "@/components/ui/Field";
 import { FormSection } from "@/components/ui/FormSection";
 import { MasterPicker } from "@/components/ui/MasterPicker";
 import { cn } from "@/lib/utils";
-import { MASTER, VALUE_CODE } from "@/modules/master-data/catalog";
+import { MASTER } from "@/modules/master-data/catalog";
 import type { MasterOptions } from "@/modules/master-data/types";
 import { DesignFields } from "@/components/lab/DesignFields";
-import { errorAt, hasCode, SampleFormContext } from "@/components/lab/form-context";
+import { errorAt, SampleFormContext } from "@/components/lab/form-context";
 import { FormulationFields } from "@/components/lab/FormulationFields";
 import { useBodyRows } from "@/components/lab/LabRowsFields";
 import { Segmented } from "@/components/ui/Segmented";
@@ -58,15 +58,11 @@ export function SampleForm({ mode, sampleId, defaults, attachments: initialFiles
     defaultValues: defaults,
     mode: "onBlur",
   });
-  const { control, register, handleSubmit, getValues, reset, setError, formState } = methods;
+  const { control, register, handleSubmit, getValues, reset, setError, clearErrors, formState } = methods;
   const errors = formState.errors;
 
   // ── watched values that drive the layout ───────────────────────────────────
-  const sampleType = useWatch({ control, name: "sampleType" });
   const physicalPresent = useWatch({ control, name: "physicalSamplePresent" });
-
-  const isCreative = hasCode([sampleType], options[MASTER.SAMPLE_TYPE], VALUE_CODE.CREATIVE_SAMPLE);
-  const isInspired = hasCode([sampleType], options[MASTER.SAMPLE_TYPE], VALUE_CODE.INSPIRED_SAMPLE);
 
   // One complete Body section per body, preserving what was typed.
   const n = useBodyRows(methods, "numberOfBodies", ["bodies"], emptySampleBody);
@@ -88,6 +84,13 @@ export function SampleForm({ mode, sampleId, defaults, attachments: initialFiles
     return handleSubmit(
       () => {
         const raw = { ...getValues(), attachmentIds: files.map((f) => f.id) };
+        // Save (not Save Draft) needs the answer — it decides where the sample goes next.
+        if (saveAs === "SUBMITTED" && !raw.physicalSamplePresent) {
+          setError("physicalSamplePresent", { type: "required", message: "Choose Yes or No." });
+          toast.error("Answer “Physical Sample Available?” before saving.");
+          scrollToError("physicalSamplePresent");
+          return;
+        }
         start(async () => {
           // Untouched suggestions are re-allocated by the server, so two people
           // saving at once never collide on a stale suggestion.
@@ -107,10 +110,14 @@ export function SampleForm({ mode, sampleId, defaults, attachments: initialFiles
             return;
           }
           toast.success(r.message ?? "Saved.");
-          if (r.data.inwardUrl) {
-            // Inspired sample with the physical sample in hand → record it in Inward / Outward.
-            toast.info("Now enter the physical sample's details in Inward / Outward.");
-            router.push(r.data.inwardUrl);
+          if (r.data.next) {
+            // Physical Sample Available? Yes → enter it in Inward / Outward; No → it waits under Rectification.
+            toast.info(
+              r.data.next.kind === "inward"
+                ? "Now enter the physical sample's details in Inward / Outward."
+                : "Physical sample not available — the sample is listed under Rectification.",
+            );
+            router.push(r.data.next.url);
             return;
           }
           if (mode === "edit") {
@@ -176,7 +183,7 @@ export function SampleForm({ mode, sampleId, defaults, attachments: initialFiles
 
           {/* 1 · Basic information */}
           <FormSection index={next()} title="Basic Information" description="Identity of the sample">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <Field label="Date" htmlFor="sampleDate" error={errorAt(errors, "sampleDate")}>
                 <input
                   id="sampleDate"
@@ -212,119 +219,104 @@ export function SampleForm({ mode, sampleId, defaults, attachments: initialFiles
                   {...register("slabNumber")}
                 />
               </Field>
-              <Field label="Sample Type" htmlFor="sampleType" error={errorAt(errors, "sampleType")}>
+              <Field label="Design Name" htmlFor="designName" error={errorAt(errors, "designName.label") ?? errorAt(errors, "designName")}>
                 <Controller
                   control={control}
-                  name="sampleType"
+                  name="designName"
                   render={({ field }) => (
                     <MasterPicker
-                      id="sampleType"
-                      options={options[MASTER.SAMPLE_TYPE]}
+                      id="designName"
+                      options={options[MASTER.DESIGN_NAME]}
                       value={field.value ?? null}
                       onChange={field.onChange}
                       allowCustom={permissions.addMaster}
-                      noun="sample type"
-                      placeholder="Select sample type"
+                      invalid={!!(errorAt(errors, "designName.label") ?? errorAt(errors, "designName"))}
+                      noun="design name"
+                      placeholder="Select or type design name"
                     />
                   )}
                 />
               </Field>
-              <Field label="Design Name" htmlFor="designName" error={errorAt(errors, "designName")}>
-                <input id="designName" className={cn("input", errorAt(errors, "designName") && "input-error")} autoComplete="off" {...register("designName")} />
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-4 border-t border-line pt-4 sm:grid-cols-2 lg:grid-cols-4">
+              <Field label="Number of Bodies (n)" htmlFor="numberOfBodies" error={errorAt(errors, "numberOfBodies")}>
+                <input
+                  id="numberOfBodies"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={MAX_BODIES}
+                  className={cn("input tabular-nums", errorAt(errors, "numberOfBodies") && "input-error")}
+                  {...register("numberOfBodies")}
+                />
+              </Field>
+              <Field
+                label="Physical Sample Available?"
+                htmlFor="physicalSamplePresent"
+                className="sm:col-span-1 lg:col-span-3"
+                error={errorAt(errors, "physicalSamplePresent")}
+                hint={
+                  physicalPresent === "YES"
+                    ? "After saving, the Inward / Outward page opens to enter the physical sample's details."
+                    : physicalPresent === "NO"
+                      ? "After saving, the Inward / Outward page opens with this sample listed under Rectification."
+                      : "Needed to save: Yes → Inward / Outward entry, No → Rectification."
+                }
+              >
+                <Controller
+                  control={control}
+                  name="physicalSamplePresent"
+                  render={({ field }) => (
+                    <Segmented
+                      id="physicalSamplePresent"
+                      value={field.value ?? ""}
+                      onChange={(v) => {
+                        field.onChange(v);
+                        if (v) clearErrors("physicalSamplePresent");
+                      }}
+                      options={[
+                        { value: "YES", label: "Yes" },
+                        { value: "NO", label: "No" },
+                      ]}
+                    />
+                  )}
+                />
               </Field>
             </div>
-            {isCreative && (
-              <div className="mt-4 grid grid-cols-1 gap-4 border-t border-line pt-4 sm:grid-cols-2 lg:grid-cols-4">
-                <Field
-                  label="Number of Bodies (n)"
-                  htmlFor="numberOfBodies"
-                  error={errorAt(errors, "numberOfBodies")}
-                >
-                  <input
-                    id="numberOfBodies"
-                    type="number"
-                    inputMode="numeric"
-                    min={1}
-                    max={MAX_BODIES}
-                    className={cn("input tabular-nums", errorAt(errors, "numberOfBodies") && "input-error")}
-                    {...register("numberOfBodies")}
-                  />
-                </Field>
-              </div>
-            )}
-            {isInspired && (
-              <div className="mt-4 border-t border-line pt-4">
-                <Field
-                  label="Physical Sample Present?"
-                  htmlFor="physicalSamplePresent"
-                  hint={
-                    physicalPresent === "YES"
-                      ? "After saving, you will be taken to Inward / Outward to enter the sample's details."
-                      : physicalPresent === "NO"
-                        ? "This sample will be listed under Rectification in Inward / Outward."
-                        : undefined
-                  }
-                >
-                  <Controller
-                    control={control}
-                    name="physicalSamplePresent"
-                    render={({ field }) => (
-                      <Segmented
-                        id="physicalSamplePresent"
-                        value={field.value ?? ""}
-                        onChange={field.onChange}
-                        options={[
-                          { value: "YES", label: "Yes" },
-                          { value: "NO", label: "No" },
-                        ]}
-                      />
-                    )}
-                  />
-                </Field>
-              </div>
-            )}
-            {sampleType && !isCreative && !isInspired && (
-              <p className="mt-4 rounded-lg bg-info-bg px-4 py-3 text-sm text-info-fg">
-                The detailed formulation form opens for <strong>Creative Sample</strong>. For other sample types, record the
-                basics, remarks and output files below.
-              </p>
-            )}
           </FormSection>
 
-          {isCreative && (
-            /* Body 1 … n — each body: Material Choices & Pigments, Design, Vein, its L, a, b */
-            <FormSection index={next()} title="Bodies" description={n > 0 ? `${n} bod${n === 1 ? "y" : "ies"} — one section each` : undefined}>
-              <BodySections
-                n={n}
-                idPrefix="s"
-                render={(i) => {
-                  const b = `bodies.${i}`;
-                  const tag = `b${i + 1}`;
-                  return (
-                    <>
-                      <BodyPart title="Material Choices & Pigments">
-                        <FormulationFields name={`${b}.main`} idPrefix={`${tag}-main`} />
-                      </BodyPart>
-                      <BodyPart title="Design">
-                        <DesignFields prefix={`${b}.`} idPrefix={`${tag}-d`} royTitle={`Roy Body Formulation — Design (Body ${i + 1})`} />
-                      </BodyPart>
-                      <BodyPart title="Vein">
-                        <VeinFields
-                          prefix={`${b}.`}
-                          idPrefix={`${tag}-`}
-                          royIdPrefix={`${tag}-vroy`}
-                          royTitle={`Roy Body Formulation — Vein (Body ${i + 1})`}
-                        />
-                      </BodyPart>
-                      <BodyPart title={`L, a, b Measurements — Body ${i + 1}`}>
-                        <BodyLabFields name={b} label={`Body ${i + 1}`} />
-                      </BodyPart>
-                    </>
-                  );
-                }}
-              />
-            </FormSection>
-          )}
+          {/* Body 1 … n — each body: Material Choices & Pigments, Design, Vein, its L, a, b */}
+          <FormSection index={next()} title="Bodies" description={n > 0 ? `${n} bod${n === 1 ? "y" : "ies"} — one section each` : undefined}>
+            <BodySections
+              n={n}
+              idPrefix="s"
+              render={(i) => {
+                const b = `bodies.${i}`;
+                const tag = `b${i + 1}`;
+                return (
+                  <>
+                    <BodyPart title="Material Choices & Pigments">
+                      <FormulationFields name={`${b}.main`} idPrefix={`${tag}-main`} />
+                    </BodyPart>
+                    <BodyPart title="Design">
+                      <DesignFields prefix={`${b}.`} idPrefix={`${tag}-d`} royTitle={`Roy Body Formulation — Design (Body ${i + 1})`} />
+                    </BodyPart>
+                    <BodyPart title="Vein">
+                      <VeinFields
+                        prefix={`${b}.`}
+                        idPrefix={`${tag}-`}
+                        royIdPrefix={`${tag}-vroy`}
+                        royTitle={`Roy Body Formulation — Vein (Body ${i + 1})`}
+                      />
+                    </BodyPart>
+                    <BodyPart title={`L, a, b Measurements — Body ${i + 1}`}>
+                      <BodyLabFields name={b} label={`Body ${i + 1}`} />
+                    </BodyPart>
+                  </>
+                );
+              }}
+            />
+          </FormSection>
 
           {/* Output */}
           <FormSection index={next()} title="Sample Output" description="Photo or document of the finished sample">

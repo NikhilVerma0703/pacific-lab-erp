@@ -152,9 +152,8 @@ function sampleCols<T>(get: (r: T) => SampleDetail | null, nBodies: number, pref
     { group: g("Basic Information"), header: "Slab Number", width: 12, kind: "number", value: (r) => get(r)?.slabNumber },
     { group: g("Basic Information"), header: "Date", width: 13, kind: "date", value: (r) => dateOnly(get(r)?.sampleDate) },
     { group: g("Basic Information"), header: "Status", width: 10, value: (r) => (get(r) ? (get(r)!.status === "DRAFT" ? "Draft" : "Saved") : null) },
-    { group: g("Basic Information"), header: "Sample Type", width: 16, value: (r) => get(r)?.sampleType?.label },
     { group: g("Basic Information"), header: "Design Name", width: 22, value: (r) => get(r)?.designName },
-    { group: g("Basic Information"), header: "Physical Sample Present", width: 12, value: (r) => yesNo(get(r)?.physicalSamplePresent ?? null) },
+    { group: g("Basic Information"), header: "Physical Sample Available", width: 12, value: (r) => yesNo(get(r)?.physicalSamplePresent ?? null) },
     { group: g("Basic Information"), header: "Number of Bodies", width: 10, kind: "number", value: (r) => get(r)?.numberOfBodies },
   ];
   for (let i = 1; i <= nBodies; i++) {

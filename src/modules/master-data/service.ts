@@ -2,7 +2,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { prisma, type Tx } from "@/lib/db";
 import { cleanLabel, MAX_LABEL_LENGTH, normalizeKey } from "@/lib/normalize";
-import { CATALOG, MASTER, type MasterCode } from "./catalog";
+import { CATALOG, catalogSortOrder, MASTER, RETIRED_CATEGORY_CODES, type MasterCode } from "./catalog";
 import type { MasterOption, MasterOptions, MasterRef } from "./types";
 
 /** Category ids by code, cached per process (categories rarely change). */
@@ -13,12 +13,36 @@ export async function categoryId(code: MasterCode, tx: Tx | typeof prisma = pris
     const rows = await tx.masterCategory.findMany({ select: { id: true, code: true } });
     categoryCache = new Map(rows.map((r) => [r.code, r.id]));
   }
+  // A list added in a newer version (e.g. Design Names) exists before anyone re-runs the seed.
+  if (!categoryCache.has(code) && (await ensureCatalogCategories())) return categoryId(code, tx);
   const id = categoryCache.get(code);
   if (!id) {
     categoryCache = null;
     throw new Error(`Master list "${code}" is missing. Run \`npm run db:seed\`.`);
   }
   return id;
+}
+
+/**
+ * Create any list of the catalog that the database does not have yet (empty —
+ * its starting values still come from `npm run db:seed`). Returns true when
+ * something was created. Runs outside any save transaction, so the new list
+ * stays even if that save fails.
+ */
+async function ensureCatalogCategories(db: typeof prisma = prisma): Promise<boolean> {
+  const have = new Set((await db.masterCategory.findMany({ select: { code: true } })).map((c) => c.code));
+  let created = false;
+  for (const [i, entry] of CATALOG.entries()) {
+    if (have.has(entry.code)) continue;
+    await db.masterCategory.upsert({
+      where: { code: entry.code },
+      update: {},
+      create: { code: entry.code, name: entry.name, description: entry.description, sortOrder: catalogSortOrder(entry, i) },
+    });
+    created = true;
+  }
+  if (created) categoryCache = null;
+  return created;
 }
 
 /**
@@ -106,7 +130,9 @@ export function listName(code: MasterCode): string {
 
 /** Category list with value counts — for the Master Data screen. */
 export async function listCategories() {
+  await ensureCatalogCategories();
   const cats = await prisma.masterCategory.findMany({
+    where: { code: { notIn: [...RETIRED_CATEGORY_CODES] } },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     include: { _count: { select: { values: true } } },
   });
@@ -137,7 +163,6 @@ export async function listValues(categoryCode: string) {
       createdBy: { select: { name: true } },
       _count: {
         select: {
-          samplesAsType: true,
           samplesAsMixer: true,
           componentsAsMaterial: true,
           componentsAsSize: true,
@@ -153,6 +178,9 @@ export async function listValues(categoryCode: string) {
           bodyVeinMethodUses: true,
           inwardBodyPatternUses: true,
           productionBodyPatternUses: true,
+          samplesAsDesignName: true,
+          inwardsAsDesignName: true,
+          productionsAsDesignName: true,
         },
       },
     },
@@ -172,7 +200,6 @@ export async function listValues(categoryCode: string) {
         createdAt: v.createdAt.toISOString(),
         updatedAt: v.updatedAt.toISOString(),
         usage:
-          c.samplesAsType +
           c.samplesAsMixer +
           c.componentsAsMaterial +
           c.componentsAsSize +
@@ -187,7 +214,10 @@ export async function listValues(categoryCode: string) {
           c.bodyPatternUses +
           c.bodyVeinMethodUses +
           c.inwardBodyPatternUses +
-          c.productionBodyPatternUses,
+          c.productionBodyPatternUses +
+          c.samplesAsDesignName +
+          c.inwardsAsDesignName +
+          c.productionsAsDesignName,
       };
     }),
   };

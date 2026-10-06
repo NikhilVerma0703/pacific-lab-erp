@@ -11,7 +11,7 @@ const body = (index: number, over: Partial<Body> = {}): Body => ({
 });
 const sample = (over: Partial<SampleDetail>): SampleDetail => ({
   id: "s", serialNo: 1, slabNumber: 1, sampleDate: "2026-10-05", status: "SUBMITTED",
-  sampleType: v("t1", "Creative Sample", "CREATIVE"), designName: null, physicalSamplePresent: null, inwardEntry: null,
+  designName: null, designNameRef: null, physicalSamplePresent: null, inwardEntry: null,
   numberOfBodies: null, bodies: [], legacyBodies: false, remarks: null, attachments: [],
   createdBy: null, updatedBy: null, createdAt: "", updatedAt: "", ...over,
 });
@@ -24,7 +24,8 @@ const s1 = sample({
   numberOfBodies: 2,
   bodies: [body(1, { designCategory: "PLAIN_BODY" }), body(2, { designCategory: "NON_PLAIN_BODY", designPatterns: [v("p1", "CARRARA"), v("p2", "ROY BODY", "ROY_BODY")] })],
 });
-const s2 = sample({ id: "b", sampleType: v("t2", "Inspired Sample", "INSPIRED"), inwardEntry: { id: "e1", serialNo: 1 } });
+// No design of its own — its Inward / Outward entry's design (Plain) is used.
+const s2 = sample({ id: "b", inwardEntry: { id: "e1", serialNo: 1 } });
 const s3 = sample({ id: "c", sampleDate: "2026-10-04", numberOfBodies: 1, bodies: [body(1, { designCategory: "PLAIN_BODY" })] });
 const inward = new Map([["e1", { categories: ["PLAIN_BODY" as const], patterns: [] }]]);
 
@@ -33,7 +34,7 @@ const pbody = (index: number, over: Partial<PBody> = {}): PBody => ({
   index, designCategory: null, designPatterns: [], royBody: null, postPress: null, postPolish: null, ...over,
 });
 const prod = (over: Partial<ProductionDetail>): ProductionDetail => ({
-  id: "p", serialNo: 1, slabNumber: 1, sampleDate: "2026-10-05", designName: null, numberOfBodies: null,
+  id: "p", serialNo: 1, slabNumber: 1, sampleDate: "2026-10-05", designName: null, designNameRef: null, numberOfBodies: null,
   bodies: [], legacyBodies: false, attachments: [], remarks: null,
   createdBy: null, updatedBy: null, createdAt: "", updatedAt: "", ...over,
 });
@@ -46,8 +47,10 @@ describe("filtered export", () => {
   it("keeps only the selected date; All sample types includes production samples", () => {
     expect(ids(applyFilters([s1, s2, s3], inward, [p1, p2, p3], base))).toEqual(["lab:a", "lab:b", "production:x", "production:y"]);
   });
-  it("filters by type, design (incl. Inspired design from Inward) and pattern", () => {
-    expect(ids(applyFilters([s1, s2], inward, [p1], { ...base, sampleType: "INSPIRED" }))).toEqual(["lab:b"]);
+  it("filters by type, design (incl. the design from the Inward entry) and pattern", () => {
+    expect(ids(applyFilters([s1, s2], inward, [p1], { ...base, sampleType: "LAB" }))).toEqual(["lab:a", "lab:b"]);
+    expect(applyFilters([s1], inward, [], base)[0]).toMatchObject({ typeLabel: "Lab Sample", bodies: 2 });
+    expect(applyFilters([s2], inward, [], base)[0].design).toMatchObject({ categories: ["PLAIN_BODY"], source: "inward" });
     // s1 matches Plain (Body 1) and Non-Plain (Body 2): any body counts.
     expect(ids(applyFilters([s1, s2], inward, [p1, p2], { ...base, design: "PLAIN_BODY" }))).toEqual(["lab:a", "lab:b", "production:y"]);
     expect(ids(applyFilters([s1, s2], inward, [p1, p2], { ...base, design: "NON_PLAIN_BODY" }))).toEqual(["lab:a", "production:x"]);
@@ -62,6 +65,10 @@ describe("filtered export", () => {
   it("parses URL filters safely (old material filters are ignored)", () => {
     expect(parseFilters({ date: "bad", type: "X", mkind: "RESIN", material: "r1" }, "2026-10-05")).toEqual(base);
     expect(parseFilters({ date: "2026-10-05", type: "PRODUCTION" }, "2026-10-05").sampleType).toBe("PRODUCTION");
+    expect(parseFilters({ date: "2026-10-05", type: "LAB" }, "2026-10-05").sampleType).toBe("LAB");
+    // Links saved while Sample Type existed (Creative / Inspired) now mean all sample types.
+    expect(parseFilters({ date: "2026-10-05", type: "INSPIRED" }, "2026-10-05").sampleType).toBe("");
+    expect(parseFilters({ date: "2026-10-05", type: "CREATIVE" }, "2026-10-05").sampleType).toBe("");
   });
   it("follows the Production Date: All and Date Range", () => {
     const all = { mode: "all" as const, date: "2026-10-05", from: "", to: "2026-10-05" };

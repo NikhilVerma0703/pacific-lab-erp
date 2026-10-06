@@ -81,7 +81,7 @@ export async function countsIn(period: Period) {
   return { samples, inward, production };
 }
 
-/** Designs (across bodies) of the Inward entries linked to these samples (for Inspired samples). */
+/** Designs (across bodies) of the Inward entries linked to these samples (used when a sample has no design of its own). */
 export async function inwardDesignsFor(samples: SampleDetail[]): Promise<Map<string, BodiesDesign>> {
   const entries = await inwardByIds(samples.map((s) => s.inwardEntry?.id).filter((x): x is string => !!x));
   return new Map(entries.map((e) => [e.id, designAcross(e.bodies)]));

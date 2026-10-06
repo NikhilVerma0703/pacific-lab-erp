@@ -1,7 +1,6 @@
 import "server-only";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { VALUE_CODE } from "@/modules/master-data/catalog";
 import {
   dec,
   royBodyToInput,
@@ -30,7 +29,10 @@ export interface InwardDetail {
   entryDate: string;
   labSample: { id: string; serialNo: number; slabNumber: number | null; sampleDate: string } | null;
   company: ValueDTO | null;
+  /** Sample Design Name as shown (the list value, or a name typed before the list existed). */
   sampleDesignName: string | null;
+  /** The Design Names list value (null for a name typed before the list existed). */
+  sampleDesignNameRef: ValueDTO | null;
   numberOfBodies: number | null;
   /** Body 1 … n. */
   bodies: InwardBodyDTO[];
@@ -92,7 +94,8 @@ export function toInwardDetail(e: EntryWithAll): InwardDetail {
       ? { ...e.labSample, sampleDate: e.labSample.sampleDate.toISOString().slice(0, 10) }
       : null,
     company: e.company,
-    sampleDesignName: e.sampleDesignName,
+    sampleDesignName: e.designNameValue?.label ?? e.legacySampleDesignName,
+    sampleDesignNameRef: e.designNameValue,
     numberOfBodies: e.numberOfBodies,
     bodies,
     legacyBodies: legacy,
@@ -112,6 +115,7 @@ export async function getInwardDetail(id: string): Promise<InwardDetail | null> 
 export function inwardReferencedIds(d: InwardDetail): string[] {
   const ids = new Set<string>();
   if (d.company) ids.add(d.company.id);
+  if (d.sampleDesignNameRef) ids.add(d.sampleDesignNameRef.id);
   for (const b of d.bodies) {
     b.designPatterns.forEach((p) => ids.add(p.id));
     for (const c of [...(b.royBody?.components ?? []), ...(b.royBody?.veinRoyBody?.components ?? [])]) {
@@ -131,7 +135,12 @@ export function inwardToFormInput(d: InwardDetail): InwardFormInput {
     serialNo: String(d.serialNo),
     labSampleId: d.labSample?.id ?? null,
     company: d.company ? { id: d.company.id, label: d.company.label } : null,
-    sampleDesignName: d.sampleDesignName ?? "",
+    // A name typed before the Design Names list existed opens as a new (Other…) name.
+    sampleDesignName: d.sampleDesignNameRef
+      ? { id: d.sampleDesignNameRef.id, label: d.sampleDesignNameRef.label }
+      : d.sampleDesignName
+        ? { label: d.sampleDesignName }
+        : null,
     numberOfBodies: d.numberOfBodies !== null ? String(d.numberOfBodies) : d.bodies.length ? String(d.bodies.length) : "",
     bodies: d.bodies.map((b) => ({
       designCategory: b.designCategory ?? "",
@@ -164,7 +173,8 @@ export async function getRecentInward(take = 10): Promise<InwardRow[]> {
       id: true,
       serialNo: true,
       entryDate: true,
-      sampleDesignName: true,
+      legacySampleDesignName: true,
+      designNameValue: { select: { label: true } },
       numberOfBodies: true,
       designCategory: true,
       recreationAttempts: true,
@@ -187,7 +197,7 @@ export async function getRecentInward(take = 10): Promise<InwardRow[]> {
     entryDate: r.entryDate.toISOString().slice(0, 10),
     labSampleSerial: r.labSample?.serialNo ?? null,
     company: r.company?.label ?? null,
-    sampleDesignName: r.sampleDesignName,
+    sampleDesignName: r.designNameValue?.label ?? r.legacySampleDesignName,
     design: bodiesDesignText(
       bodyDesignsOrLegacy(
         r.bodies.map((b) => ({ bodyIndex: b.bodyIndex, designCategory: b.designCategory, patterns: b.designPatterns.map((p) => p.pattern) })),
@@ -209,10 +219,10 @@ export interface RectificationRow {
   createdBy: string | null;
 }
 
-/** Inspired lab samples whose physical sample is not present. */
+/** Lab samples saved with Physical Sample Available? = No (not yet received). */
 export async function getRectification(): Promise<RectificationRow[]> {
   const rows = await prisma.labSample.findMany({
-    where: { physicalSamplePresent: false, sampleType: { code: VALUE_CODE.INSPIRED_SAMPLE } },
+    where: { physicalSamplePresent: false },
     orderBy: [{ sampleDate: "desc" }, { serialNo: "desc" }],
     take: 200,
     select: {
@@ -245,7 +255,6 @@ export async function getLinkableSample(id: string) {
       serialNo: true,
       slabNumber: true,
       sampleDate: true,
-      sampleType: { select: { code: true } },
       inwardEntry: { select: { id: true } },
     },
   });
@@ -255,7 +264,6 @@ export async function getLinkableSample(id: string) {
     serialNo: s.serialNo,
     slabNumber: s.slabNumber,
     sampleDate: s.sampleDate.toISOString().slice(0, 10),
-    isInspired: s.sampleType?.code === VALUE_CODE.INSPIRED_SAMPLE,
     existingEntryId: s.inwardEntry?.id ?? null,
   };
 }
