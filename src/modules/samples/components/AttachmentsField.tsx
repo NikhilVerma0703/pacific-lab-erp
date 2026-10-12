@@ -18,6 +18,7 @@ export function AttachmentsField({
   onChange,
   sampleId,
   productionSampleId,
+  inwardEntryId,
   canUpload,
   canRemove,
   maxMb,
@@ -27,6 +28,8 @@ export function AttachmentsField({
   sampleId?: string;
   /** Set instead of `sampleId` when the files belong to a production sample. */
   productionSampleId?: string;
+  /** Set instead of `sampleId` when the files belong to an Inward / Outward entry. */
+  inwardEntryId?: string;
   canUpload: boolean;
   canRemove: boolean;
   maxMb: number;
@@ -44,6 +47,7 @@ export function AttachmentsField({
       fd.append("file", file);
       if (sampleId) fd.append("sampleId", sampleId);
       if (productionSampleId) fd.append("productionSampleId", productionSampleId);
+      if (inwardEntryId) fd.append("inwardEntryId", inwardEntryId);
       fd.append("existing", filesRef.current.map((f) => f.id).join(","));
       const xhr = new XMLHttpRequest();
       xhr.open("POST", "/api/uploads");

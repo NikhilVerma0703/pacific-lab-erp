@@ -6,7 +6,7 @@ import type { ProductionDetail, ReadingDTO } from "@/modules/production/queries"
 import type { CompleteRow } from "./data";
 import { componentText, wantsLab, wantsProduction, type ExportFilters, type FilteredRow } from "./filters";
 import { periodLabel } from "./period";
-import { unionLabels } from "@/modules/samples/bodies";
+import { unionLabels, veinDetailsText } from "@/modules/samples/bodies";
 
 // ── generic sheet writer ─────────────────────────────────────────────────────
 
@@ -120,7 +120,7 @@ function royDetailCols<T>(group: string, get: (r: T) => FormulationDTO | undefin
     { group, header: "Roy Body — Vein", width: 10, value: (r) => yesNo(get(r)?.hasVein ?? null) },
     { group, header: "Roy Body — Mixer Type", width: 14, value: (r) => get(r)?.mixerType?.label },
     { group, header: "Roy Body — How Vein Introduced", width: 24, value: (r) => (get(r) ? labels(get(r)!.veinMethods) : null) },
-    { group, header: "Roy Body — Vein Details", width: 24, value: (r) => get(r)?.veinNotes },
+    { group, header: "Roy Body — Vein Details", width: 24, value: (r) => (get(r) ? veinDetailsText(get(r)!.veinDetails, get(r)!.veinNotes) : null) },
     ...formulationCols<T>(`${group} · Vein Roy Body`, (r) => get(r)?.veinRoyBody).map((c) => ({ ...c, header: `Vein Roy Body — ${c.header}` })),
   ];
 }
@@ -168,7 +168,7 @@ function sampleCols<T>(get: (r: T) => SampleDetail | null, nBodies: number, pref
       { group: B("Vein"), header: "Mixer Type", width: 12, value: (r) => b(r)?.mixerType?.label },
       { group: B("Vein"), header: "Vein", width: 8, value: (r) => yesNo(b(r)?.hasVein ?? null) },
       { group: B("Vein"), header: "How Vein Introduced", width: 24, value: (r) => (b(r) ? labels(b(r)!.veinMethods) : null) },
-      { group: B("Vein"), header: "Vein Details", width: 28, value: (r) => b(r)?.veinNotes },
+      { group: B("Vein"), header: "Vein Details", width: 28, value: (r) => (b(r) ? veinDetailsText(b(r)!.veinDetails, b(r)!.veinNotes) : null) },
       ...formulationCols<T>(B("Roy Body Formulation — Vein"), (r) => b(r)?.veinRoyBody),
       ...bodyLabCols<T>(B("L, a, b"), [
         { title: "Post Press", get: (r) => b(r)?.postPress },

@@ -24,11 +24,11 @@ export default async function SampleDetailPage({ params }: { params: Promise<{ i
   return (
     <>
       <PageHeader
-        title={`Sample S.No. ${s.serialNo}`}
+        title={`Lab Sample S.No. ${s.serialNo}`}
         description={`${s.slabNumber ? `Slab ${s.slabNumber} · ` : ""}${formatDate(s.sampleDate)}${s.designName ? ` · ${s.designName}` : ""}`}
         actions={
           <>
-            <Link href="/samples" className="btn-secondary">
+            <Link href="/samples#recent" className="btn-secondary">
               <ArrowLeft className="size-4" /> Back
             </Link>
             {can(user, "sample.edit") && (

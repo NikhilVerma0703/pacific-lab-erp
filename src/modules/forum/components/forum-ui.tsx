@@ -1,5 +1,6 @@
 "use client";
 
+import { sameText } from "@/lib/normalize";
 import { ChevronDown } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -98,7 +99,8 @@ export function Avatar({ name, tone = "brand", size = "md" }: { name: string; to
   );
 }
 
-export const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+/** Same person's name, ignoring case and spaces. */
+export const sameName = (a: string, b: string) => sameText(a, b);
 
 const NAME_KEY = "lab-erp:forum-name";
 

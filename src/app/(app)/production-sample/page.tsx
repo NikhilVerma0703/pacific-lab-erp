@@ -10,7 +10,7 @@ import { suggestProductionNumbers } from "@/modules/production/numbering";
 import { productionFormPermissions } from "@/modules/production/page-helpers";
 import { getProductionRegister, REGISTER_PAGE_SIZE } from "@/modules/production/queries";
 import { newProductionInput } from "@/modules/production/schema";
-import { uploadLimitMb } from "@/modules/samples/page-helpers";
+import { maxUploadMb } from "@/lib/uploads";
 
 export const metadata = { title: "Production Sample" };
 export const dynamic = "force-dynamic";
@@ -29,7 +29,7 @@ export default async function ProductionSamplePage({ searchParams }: { searchPar
 
   return (
     <>
-      <PageHeader title="Production Sample" description="Samples received from the production plant and their readings." />
+      <PageHeader title="Production Sample" description="Samples received from the production plant — basic information, L, a, b of each body, output and remarks." />
       {canCreate ? (
         <ProductionForm
           mode="create"
@@ -37,7 +37,7 @@ export default async function ProductionSamplePage({ searchParams }: { searchPar
           attachments={[]}
           options={options}
           permissions={productionFormPermissions(user)}
-          maxUploadMb={uploadLimitMb()}
+          maxUploadMb={maxUploadMb()}
         />
       ) : (
         <p className="card p-5 text-sm text-ink-2">Your role can view production samples but not create them.</p>

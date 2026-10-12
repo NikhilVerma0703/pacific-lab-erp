@@ -28,7 +28,7 @@ export function TodayPanel({ data }: { data: DashboardData["todayStats"] }) {
         <CardTitle icon={<Palette className="size-4" />}>Designs Worked On Today</CardTitle>
         <p className="mt-2 text-5xl font-bold tracking-tight tabular-nums">{data.designs.length}</p>
         {data.designs.length === 0 ? (
-          <p className="mt-4 text-sm text-ink-3">No designs recorded today yet.</p>
+          <p className="mt-4 text-sm text-ink-3">No Design Names recorded today yet.</p>
         ) : (
           <>
             <ul className="mt-4 flex flex-wrap gap-1.5">

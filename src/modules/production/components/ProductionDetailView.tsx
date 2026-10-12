@@ -1,69 +1,38 @@
 "use client";
 
 import { useState } from "react";
-import { BodyLabTable, BodyViewCard, BodyViewPart, LegacyBodiesNote } from "@/components/lab/BodyView";
-import { LabTablesView } from "@/components/lab/LabTablesView";
+import { BodyReadingsView } from "@/components/forms/BodyReadingsView";
 import { formatDate, formatDateTime } from "@/lib/utils";
 import { AttachmentCard } from "@/modules/samples/components/AttachmentsField";
 import { FileViewer, type ViewableFile } from "@/modules/samples/components/FileViewer";
-import { Block, Empty, Grid, Item, Nested } from "@/modules/samples/components/SampleDetailView";
 import type { ProductionDetail } from "../queries";
 
-/** Read-only, form-shaped view of everything recorded for a production sample. */
+/** Review page: everything recorded for a production sample, in the order of the form. */
 export function ProductionDetailView({ s }: { s: ProductionDetail }) {
   const [viewing, setViewing] = useState<ViewableFile | null>(null);
+  const basic: [string, React.ReactNode][] = [
+    ["Date", formatDate(s.sampleDate)],
+    ["S.No.", s.serialNo],
+    ["Slab Number", s.slabNumber],
+    ["Design Name", s.designName],
+    ["Number of Bodies (N)", s.numberOfBodies],
+  ];
 
   return (
     <div className="space-y-4">
       <Block index={1} title="Basic Information">
-        <Grid>
-          <Item label="Date" value={formatDate(s.sampleDate)} />
-          <Item label="S. No." value={s.serialNo} />
-          <Item label="Slab Number" value={s.slabNumber} />
-          <Item label="Design Name" value={s.designName} />
-          <Item label="Number of Bodies (n)" value={s.numberOfBodies} />
-        </Grid>
+        <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          {basic.map(([label, value]) => (
+            <div key={label} className="min-w-0">
+              <dt className="text-[12px] font-semibold tracking-wide text-ink-3 uppercase">{label}</dt>
+              <dd className="mt-0.5 text-[15px] break-words">{value === null || value === undefined || value === "" ? "—" : value}</dd>
+            </div>
+          ))}
+        </dl>
       </Block>
 
-      <Block index={2} title="Bodies">
-        {s.bodies.length === 0 ? (
-          <Empty text="Number of Bodies not recorded." />
-        ) : (
-          <div className="space-y-4">
-            {s.legacyBodies && <LegacyBodiesNote parts="Design" />}
-            {s.bodies.map((b) => (
-              <BodyViewCard key={b.index} index={b.index}>
-                <BodyViewPart title="Design">
-                  <Grid>
-                    <Item label="Design" value={b.designCategory === "PLAIN_BODY" ? "Plain Body" : b.designCategory === "NON_PLAIN_BODY" ? "Non-Plain Body" : null} />
-                    {b.designCategory === "NON_PLAIN_BODY" && <Item label="Design Pattern(s)" value={b.designPatterns.map((p) => p.label).join(", ")} wide />}
-                  </Grid>
-                  {b.royBody && (
-                    <Nested title={`Roy Body — Design (Body ${b.index})`}>
-                      <div className="space-y-4">
-                        <Grid>
-                          <Item label="Number of Bodies (n)" value={b.royBody.numberOfBodies} />
-                        </Grid>
-                        <section className="rounded-lg border border-line bg-white p-4">
-                          <h5 className="mb-3 text-[13px] font-bold tracking-wide text-ink-2 uppercase">L, a, b Values</h5>
-                          <LabTablesView n={b.royBody.numberOfBodies} readings={b.royBody.readings} />
-                        </section>
-                      </div>
-                    </Nested>
-                  )}
-                </BodyViewPart>
-                <BodyViewPart title={`L, a, b Measurements — Body ${b.index}`}>
-                  <BodyLabTable
-                    rows={[
-                      { title: "Post Press", value: b.postPress },
-                      { title: "Post Polish", value: b.postPolish, dot: "accent" },
-                    ]}
-                  />
-                </BodyViewPart>
-              </BodyViewCard>
-            ))}
-          </div>
-        )}
+      <Block index={2} title="L, a, b Measurements">
+        <BodyReadingsView bodies={s.bodies} />
       </Block>
 
       <Block index={3} title="Sample Output">
@@ -74,12 +43,12 @@ export function ProductionDetailView({ s }: { s: ProductionDetail }) {
             ))}
           </ul>
         ) : (
-          <Empty text="No files attached." />
+          <p className="text-sm text-ink-3">No files attached.</p>
         )}
       </Block>
 
       <Block index={4} title="Remarks">
-        {s.remarks ? <p className="text-[15px] break-words whitespace-pre-wrap">{s.remarks}</p> : <Empty />}
+        {s.remarks ? <p className="text-[15px] break-words whitespace-pre-wrap">{s.remarks}</p> : <p className="text-sm text-ink-3">Not recorded.</p>}
       </Block>
 
       <p className="px-1 text-[12px] text-ink-3">
@@ -90,5 +59,17 @@ export function ProductionDetailView({ s }: { s: ProductionDetail }) {
 
       <FileViewer file={viewing} onClose={() => setViewing(null)} />
     </div>
+  );
+}
+
+function Block({ index, title, children }: { index: number; title: string; children: React.ReactNode }) {
+  return (
+    <section className="card break-inside-avoid">
+      <header className="flex items-center gap-3 border-b border-line px-4 py-3 sm:px-5">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-brand text-xs font-bold text-white">{index}</span>
+        <h2 className="text-[15px] font-bold">{title}</h2>
+      </header>
+      <div className="px-4 py-4 sm:px-5">{children}</div>
+    </section>
   );
 }

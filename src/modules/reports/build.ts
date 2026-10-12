@@ -4,6 +4,7 @@
  * The date basis is the sample's Date field (what the lab records), not the
  * moment the row was typed in. Drafts count: a draft is still a slab made.
  */
+import { compareLabels, normalizeKey } from "@/lib/normalize";
 
 export const REPORT_RANGES = [7, 15, 30] as const;
 export type ReportRange = (typeof REPORT_RANGES)[number];
@@ -85,16 +86,23 @@ export function buildReport(rows: ReportSampleRow[], today: string, days: Report
   const productionSamples = dates.map((date) => ({ date, count: productionPerDate.get(date)! }));
 
   const perDate = new Map(dates.map((d) => [d, 0]));
-  const designCounts = new Map<string, number>();
+  // Keyed ignoring case / spaces, shown with the first spelling seen.
+  const designCounts = new Map<string, { pattern: string; count: number }>();
   let withoutDesign = 0;
 
   for (const s of samples) {
     perDate.set(s.date, perDate.get(s.date)! + 1);
 
     // Each sample counts once per design pattern it carries (on any body).
-    const designs = [...new Set(s.designs)];
+    const designs: string[] = [];
+    for (const d of s.designs) if (!designs.some((x) => normalizeKey(x) === normalizeKey(d))) designs.push(d);
     if (!designs.length) withoutDesign++;
-    for (const d of designs) designCounts.set(d, (designCounts.get(d) ?? 0) + 1);
+    for (const d of designs) {
+      const k = normalizeKey(d);
+      const t = designCounts.get(k);
+      if (t) t.count++;
+      else designCounts.set(k, { pattern: d, count: 1 });
+    }
   }
 
   const consumption = {} as Record<MaterialKind, ConsumptionData>;
@@ -124,7 +132,7 @@ export function buildReport(rows: ReportSampleRow[], today: string, days: Report
     }
     const byMaterial = [...totals.entries()]
       .map(([material, grams]) => ({ material, grams: round(grams) }))
-      .sort((a, b) => b.grams - a.grams || a.material.localeCompare(b.material));
+      .sort((a, b) => b.grams - a.grams || compareLabels(a.material, b.material));
     const needsOther = byMaterial.length > MAX_MATERIAL_SERIES;
     const named = byMaterial.slice(0, needsOther ? MAX_MATERIAL_SERIES - 1 : MAX_MATERIAL_SERIES).map((m) => m.material);
     const series = needsOther ? [...named, OTHER] : named;
@@ -159,9 +167,7 @@ export function buildReport(rows: ReportSampleRow[], today: string, days: Report
     },
     production: dates.map((date) => ({ date, count: perDate.get(date)! })),
     productionSamples,
-    designs: [...designCounts.entries()]
-      .map(([pattern, count]) => ({ pattern, count }))
-      .sort((a, b) => b.count - a.count || a.pattern.localeCompare(b.pattern)),
+    designs: [...designCounts.values()].sort((a, b) => b.count - a.count || compareLabels(a.pattern, b.pattern)),
     consumption,
   };
 }

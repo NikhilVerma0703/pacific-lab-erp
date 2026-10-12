@@ -1,60 +1,66 @@
 import { describe, expect, it } from "vitest";
-import { emptyProductionBody, newProductionInput, productionFormSchema } from "@/modules/production/schema";
+import { bodyCount, emptyBodyReadings, fieldErrorsOf } from "@/modules/forms/fields";
+import { newProductionInput, productionFormSchema, visibleProductionInput } from "@/modules/production/schema";
 
-const blank = () => newProductionInput({ serialNo: 7, slabNumber: 120, today: "2026-10-06" });
+const blank = () => newProductionInput({ serialNo: 7, slabNumber: 120, today: "2026-10-12" });
+const reading = (l: string, a: string, b: string) => ({ l, a, b });
 
-describe("production sample form schema", () => {
-  it("accepts a blank entry (nothing is mandatory)", () => {
-    const r = productionFormSchema.parse(blank());
-    expect(r.serialNo).toBe(7);
-    expect(r.slabNumber).toBe(120);
-    expect(r.designName).toBeNull();
-    expect(r.numberOfBodies).toBeNull();
-    expect(r.bodies).toEqual([]);
+describe("Production Sample form", () => {
+  it("has exactly the five Basic Information fields, the bodies, files and remarks", () => {
+    expect(Object.keys(blank()).sort()).toEqual(
+      ["attachmentIds", "bodies", "designName", "numberOfBodies", "remarks", "sampleDate", "serialNo", "slabNumber"].sort(),
+    );
   });
 
-  it("parses each body's readings and its Roy Body", () => {
+  it("accepts a blank entry (nothing is mandatory)", () => {
+    const r = productionFormSchema.parse(blank());
+    expect(r).toMatchObject({ serialNo: 7, slabNumber: 120, sampleDate: "2026-10-12", designName: null, numberOfBodies: null, bodies: [], remarks: null });
+  });
+
+  it("N = 2 → Body 1 and Body 2, each Post Press and Post Polish L, a, b", () => {
     const r = productionFormSchema.parse({
       ...blank(),
       designName: { id: "dn1", label: "Calacatta Gold" },
       numberOfBodies: "2",
       bodies: [
-        {
-          ...emptyProductionBody(),
-          designCategory: "NON_PLAIN_BODY",
-          designPatterns: [{ id: "p1", label: "Roy Body" }],
-          designRoyBody: { numberOfBodies: "1", postPress: [{ l: "80", a: "0.2", b: "1.9" }], postPolish: [{ l: "", a: "", b: "" }] },
-          postPress: { l: "72.5", a: "-0.3", b: "2" },
-          postPolish: { l: "71", a: "0", b: "2.1" },
-        },
-        { ...emptyProductionBody(), designCategory: "PLAIN_BODY", postPolish: { l: "70", a: "0.1", b: "2.2" } },
+        { postPress: reading("72.5", "-0.3", "2"), postPolish: reading("71", "0", "2.1") },
+        { postPress: reading("", "", ""), postPolish: reading("70", "0.1", "2.2") },
       ],
       remarks: "  Slight shade variation  ",
     });
     expect(r.designName).toEqual({ id: "dn1", label: "Calacatta Gold" });
-    expect(r.bodies[0].postPress).toEqual({ l: 72.5, a: -0.3, b: 2 });
-    expect(r.bodies[1].postPress).toEqual({ l: null, a: null, b: null });
-    expect(r.bodies[1].postPolish).toEqual({ l: 70, a: 0.1, b: 2.2 });
-    expect(r.bodies[0].designRoyBody.numberOfBodies).toBe(1);
-    expect(r.bodies[0].designRoyBody.postPress[0].l).toBe(80);
+    expect(r.numberOfBodies).toBe(2);
+    expect(r.bodies[0]).toEqual({ postPress: { l: 72.5, a: -0.3, b: 2 }, postPolish: { l: 71, a: 0, b: 2.1 } });
+    expect(r.bodies[1]).toEqual({ postPress: { l: null, a: null, b: null }, postPolish: { l: 70, a: 0.1, b: 2.2 } });
     expect(r.remarks).toBe("Slight shade variation");
   });
 
-  it("rejects out-of-range values and more body sections than bodies", () => {
-    const range = productionFormSchema.safeParse({ ...blank(), numberOfBodies: "1", bodies: [{ ...emptyProductionBody(), postPress: { l: "120", a: "", b: "" } }] });
-    expect(range.success ? [] : range.error.issues.map((i) => i.path.join("."))).toEqual(["bodies.0.postPress.l"]);
-    const extra = productionFormSchema.safeParse({ ...blank(), numberOfBodies: "1", bodies: [emptyProductionBody(), emptyProductionBody()] });
-    expect(extra.success ? [] : extra.error.issues.map((i) => i.path.join("."))).toEqual(["numberOfBodies"]);
-    expect(productionFormSchema.safeParse({ ...blank(), numberOfBodies: "0" }).success).toBe(false);
-    expect(productionFormSchema.safeParse({ ...blank(), slabNumber: "12.5" }).success).toBe(false);
+  it("checks what is typed: L 0–100, a / b −128…128, N 1–20 whole", () => {
+    const bad = productionFormSchema.safeParse({
+      ...blank(),
+      numberOfBodies: "1.5",
+      bodies: [{ postPress: reading("101", "abc", "-129"), postPolish: reading("", "", "") }],
+    });
+    expect(bad.success).toBe(false);
+    const errs = fieldErrorsOf(bad.error!.issues);
+    expect(Object.keys(errs).sort()).toEqual(["bodies.0.postPress.a", "bodies.0.postPress.b", "bodies.0.postPress.l", "numberOfBodies"]);
+    expect(errs["bodies.0.postPress.l"]).toBe("L must be at most 100.");
+    expect(productionFormSchema.safeParse({ ...blank(), numberOfBodies: "21" }).success).toBe(false);
   });
 
-  it("flags a pattern picked twice in a body", () => {
-    const r = productionFormSchema.safeParse({
+  it("only Body 1 … N count: readings kept above N are neither validated nor saved", () => {
+    const input = {
       ...blank(),
       numberOfBodies: "1",
-      bodies: [{ ...emptyProductionBody(), designCategory: "NON_PLAIN_BODY", designPatterns: [{ id: "p1", label: "Roy Body" }, { id: "p1", label: "Roy Body" }] }],
-    });
-    expect(r.success).toBe(false);
+      bodies: [{ postPress: reading("70", "0", "1"), postPolish: reading("", "", "") }, { postPress: reading("abc", "", ""), postPolish: reading("", "", "") }],
+    };
+    expect(productionFormSchema.safeParse(input).success).toBe(false); // body 2 is invalid …
+    const r = productionFormSchema.parse(visibleProductionInput(input)); // … but hidden, so it is ignored
+    expect(r.bodies).toHaveLength(1);
+  });
+
+  it("reads Number of Bodies (N) for the body sections", () => {
+    expect([bodyCount("2"), bodyCount(" 3 "), bodyCount(""), bodyCount("0"), bodyCount("21"), bodyCount("1.5"), bodyCount("abc")]).toEqual([2, 3, 0, 0, 0, 0, 0]);
+    expect(emptyBodyReadings()).toEqual({ postPress: { l: "", a: "", b: "" }, postPolish: { l: "", a: "", b: "" } });
   });
 });

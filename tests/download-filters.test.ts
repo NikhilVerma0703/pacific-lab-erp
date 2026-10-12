@@ -7,12 +7,13 @@ const v = (id: string, label: string, code: string | null = null) => ({ id, labe
 type Body = SampleDetail["bodies"][number];
 const body = (index: number, over: Partial<Body> = {}): Body => ({
   index, main: null, designCategory: null, designPatterns: [], designRoyBody: null, mixerType: null, hasVein: null,
-  veinMethods: [], veinNotes: null, veinRoyBody: null, postPress: null, postPolish: null, ...over,
+  veinMethods: [], veinDetails: [], veinNotes: null, veinRoyBody: null, postPress: null, postPolish: null, ...over,
 });
 const sample = (over: Partial<SampleDetail>): SampleDetail => ({
   id: "s", serialNo: 1, slabNumber: 1, sampleDate: "2026-10-05", status: "SUBMITTED",
   designName: null, designNameRef: null, physicalSamplePresent: null, inwardEntry: null,
-  numberOfBodies: null, bodies: [], legacyBodies: false, remarks: null, attachments: [],
+  numberOfBodies: null, plainBody: null, designTypes: [], otherPatterns: [], bodies: [], royBodies: [], chessboardBodies: [],
+  legacyBodies: false, remarks: null, attachments: [],
   createdBy: null, updatedBy: null, createdAt: "", updatedAt: "", ...over,
 });
 const day = { mode: "date" as const, date: "2026-10-05", from: "2026-09-29", to: "2026-10-05" };

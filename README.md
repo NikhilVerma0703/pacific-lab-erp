@@ -2,13 +2,15 @@
 
 Laboratory / R&D sub-ERP: lab samples, their formulations, design, vein, L/a/b readings and output files, with the master lists that feed every dropdown.
 
-**Live sections:** Dashboard (with the Forum), Sample Data Entry, Sample Inward / Outward (with Rectification), Production Sample, Reports, Downloads and Master Data.
+**Live sections:** Dashboard (with the Forum), Sample Data Entry (rebuilt Lab Sample form + Recent Entries), Sample Inward / Outward (rebuilt form + register + Rectification), Production Sample (rebuilt form + register), Reports, Downloads and Master Data. The three forms were rebuilt in October 2026 (see `docs/ARCHITECTURE.md` → "Forms rebuild").
 
 > **Updating an existing install:** after copying new code, run `npm install` and `npm run db:push` (applies new tables/columns), then `npm run db:seed` (adds any new master lists, removes retired ones). Existing data is kept.
 >
 > *Sample Type removal (Creative / Inspired):* `db:push` will warn that it drops the `LabSample.sampleTypeId` column — answer **y** (or run `npx prisma db push --accept-data-loss`). Only that column goes; every sample and its other data stay. Then `npm run db:seed` deletes the retired *Sample Types* list.
 >
 > *Design Names list:* `db:push` adds the new `designNameId` columns (no data loss); `npm run db:seed` then moves every Design Name / Sample Design Name typed so far into the new **Design Names** list.
+>
+> *Vein Details list:* `db:push` adds two tables (`SampleBodyVeinDetail`, `FormulationVeinDetail`) — no data loss. Every Vein details text recorded so far is moved into the new **Vein Details** list the first time the app runs (or by `npm run db:seed`).
 
 Stack: Next.js 15 (App Router) · TypeScript · Tailwind CSS 4 · PostgreSQL · Prisma 6 · React Hook Form + Zod · Recharts · ExcelJS · Inngest.
 

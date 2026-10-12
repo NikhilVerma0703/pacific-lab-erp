@@ -7,6 +7,7 @@ import { ArrowDown, ArrowUp, Check, Eye, EyeOff, Pencil, Plus, Search, X } from 
 import { toast } from "sonner";
 import { cn, formatDate } from "@/lib/utils";
 import { normalizeKey } from "@/lib/normalize";
+import { labelLimit } from "../catalog";
 import {
   createMasterValue,
   moveMasterValue,
@@ -159,7 +160,7 @@ export function MasterDataManager({
                 className={cn("input", newError && "input-error")}
                 placeholder={`New ${category.name.toLowerCase().replace(/s$/, "")}`}
                 value={newLabel}
-                maxLength={80}
+                maxLength={labelLimit(category.code)}
                 onChange={(e) => {
                   setNewLabel(e.target.value);
                   setNewError(undefined);
@@ -228,7 +229,7 @@ export function MasterDataManager({
                           className={cn("input", editing.error && "input-error")}
                           value={editing.label}
                           autoFocus
-                          maxLength={80}
+                          maxLength={labelLimit(category.code)}
                           aria-label="Value name"
                           onChange={(e) => setEditing({ ...editing, label: e.target.value, error: undefined })}
                           onKeyDown={(e) => {

@@ -3,32 +3,41 @@
 import { revalidatePath } from "next/cache";
 import { fail, type ActionResult } from "@/lib/action-result";
 import { PermissionError, requirePermission } from "@/lib/session";
-import { inwardFormSchema, type InwardFormInput } from "./schema";
-import { deleteInward, InwardSaveError, nextInwardSerial, saveInward } from "./service";
-import { prisma } from "@/lib/db";
+import { storage } from "@/lib/storage";
+import { fieldErrorsOf } from "@/modules/forms/fields";
+import { suggestInwardNumbers } from "./numbering";
+import { inwardFormSchema, visibleInwardInput, type InwardFormInput } from "./schema";
+import { deleteInward, InwardSaveError, saveInward } from "./service";
+
+const PATH = "/inward-outward";
+
+async function removeFiles(keys: string[]) {
+  // After the transaction committed — a failed file delete must never undo a save.
+  await Promise.all(keys.map((k) => storage().delete(k).catch((e) => console.error("file delete", k, e))));
+}
 
 export async function saveInwardAction(
   input: InwardFormInput,
-  opts: { id?: string; autoSerial?: boolean },
-): Promise<ActionResult<{ id: string; serialNo: number }>> {
+  opts: { id?: string; autoSerial?: boolean; autoSlab?: boolean },
+): Promise<ActionResult<{ id: string; serialNo: number; slabNumber: number | null }>> {
   try {
     const user = await requirePermission(opts.id ? "inward.edit" : "inward.create");
-    const parsed = inwardFormSchema.safeParse(input);
-    if (!parsed.success) {
-      const fieldErrors: Record<string, string> = {};
-      for (const issue of parsed.error.issues) {
-        const key = issue.path.join(".");
-        if (!fieldErrors[key]) fieldErrors[key] = issue.message;
-      }
-      return fail("Some values are not valid — see the highlighted fields.", fieldErrors);
-    }
-    const r = await saveInward({ id: opts.id, data: parsed.data, user, autoSerial: !!opts.autoSerial });
-    revalidatePath("/inward-outward");
-    revalidatePath("/samples");
+
+    // Backend validation is the one that counts — on what the form shows only.
+    const parsed = inwardFormSchema.safeParse(visibleInwardInput(input));
+    if (!parsed.success) return fail("Some values are not valid — see the highlighted fields.", fieldErrorsOf(parsed.error.issues));
+
+    const r = await saveInward({ id: opts.id, data: parsed.data, user, autoSerial: !!opts.autoSerial, autoSlab: !!opts.autoSlab });
+    await removeFiles(r.removedKeys);
+    revalidatePath(PATH);
+    revalidatePath("/dashboard");
+    if (opts.id) revalidatePath(`${PATH}/${opts.id}`);
+
+    const what = `S.No. ${r.serialNo}${r.slabNumber ? ` (Slab ${r.slabNumber})` : ""}`;
     return {
       ok: true,
-      data: r,
-      message: opts.id ? `Serial No. ${r.serialNo} updated.` : `Inward / Outward entry saved — Serial No. ${r.serialNo}.`,
+      data: { id: r.id, serialNo: r.serialNo, slabNumber: r.slabNumber },
+      message: opts.id ? `${what} updated.` : `Inward / Outward entry saved — ${what}.`,
     };
   } catch (e) {
     if (e instanceof PermissionError) return fail(e.message);
@@ -41,9 +50,11 @@ export async function saveInwardAction(
 export async function deleteInwardAction(id: string): Promise<ActionResult> {
   try {
     const user = await requirePermission("inward.delete");
-    const { serialNo } = await deleteInward(id, user);
-    revalidatePath("/inward-outward");
-    return { ok: true, data: undefined, message: `Serial No. ${serialNo} deleted.` };
+    const { serialNo, removedKeys } = await deleteInward(id, user);
+    await removeFiles(removedKeys);
+    revalidatePath(PATH);
+    revalidatePath("/dashboard");
+    return { ok: true, data: undefined, message: `Inward / Outward S.No. ${serialNo} deleted.` };
   } catch (e) {
     if (e instanceof PermissionError) return fail(e.message);
     if (e instanceof InwardSaveError) return fail(e.message);
@@ -52,7 +63,8 @@ export async function deleteInwardAction(id: string): Promise<ActionResult> {
   }
 }
 
-export async function nextInwardSerialAction(): Promise<number> {
+/** Fresh S.No. / Slab suggestions after a save, without reloading the page. */
+export async function nextInwardNumbersAction() {
   await requirePermission("inward.create");
-  return nextInwardSerial(prisma);
+  return suggestInwardNumbers();
 }

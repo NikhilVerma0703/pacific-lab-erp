@@ -6,6 +6,7 @@
  * Every form records Body 1 … n separately. A record saved before that keeps
  * one design for the whole record; it is shown as that design on every body.
  */
+import { normalizeKey } from "../../lib/normalize";
 
 export type DesignCategoryValue = "PLAIN_BODY" | "NON_PLAIN_BODY";
 
@@ -39,7 +40,7 @@ export function unionLabels(lists: { label: string }[][]): string[] {
   const seen = new Set<string>();
   for (const list of lists)
     for (const v of list) {
-      const k = v.label.trim().toLowerCase();
+      const k = normalizeKey(v.label);
       if (!seen.has(k)) {
         seen.add(k);
         out.push(v.label);
@@ -48,13 +49,13 @@ export function unionLabels(lists: { label: string }[][]): string[] {
   return out;
 }
 
-/** Distinct values by id (falls back to label), first-seen order. */
+/** Distinct values (same name ignoring case / spaces = same value), first-seen order. */
 export function unionValues<T extends { id?: string; label: string }>(lists: T[][]): T[] {
   const out: T[] = [];
   const seen = new Set<string>();
   for (const list of lists)
     for (const v of list) {
-      const k = v.id ?? v.label.trim().toLowerCase();
+      const k = normalizeKey(v.label);
       if (!seen.has(k)) {
         seen.add(k);
         out.push(v);
@@ -97,4 +98,15 @@ export function bodyDesignsOrLegacy(
   const hasLegacy = legacy.designCategory !== null || legacy.patterns.length > 0;
   const n = numberOfBodies ?? (hasLegacy ? 1 : 0);
   return Array.from({ length: n }, () => ({ designCategory: legacy.designCategory, patterns: legacy.patterns }));
+}
+
+/**
+ * "Thin white, Diagonal" — vein details as text: the Vein Details values,
+ * plus any text typed before that list existed (unless it is one of them).
+ */
+export function veinDetailsText(details: { label: string }[], legacy?: string | null): string {
+  const labels = details.map((d) => d.label);
+  const text = legacy?.trim();
+  if (text && !labels.some((l) => normalizeKey(l) === normalizeKey(text))) labels.push(text);
+  return labels.join(", ");
 }

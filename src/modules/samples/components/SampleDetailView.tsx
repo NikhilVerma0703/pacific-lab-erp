@@ -2,99 +2,102 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { cn, formatDate, formatDateTime } from "@/lib/utils";
-import type { SampleDetail } from "../queries";
 import { FormulationView } from "@/components/lab/FormulationView";
 import { RoyBodyView } from "@/components/lab/RoyBodyView";
-import { BodyLabTable, BodyViewCard, BodyViewPart, LegacyBodiesNote } from "@/components/lab/BodyView";
+import { MaterialsView } from "@/components/forms/MaterialsView";
+import { StageRowsView } from "@/components/forms/StageRowsView";
+import { cn, formatDate, formatDateTime, formatNumber } from "@/lib/utils";
+import { designType } from "@/modules/forms/design-types";
+import { bodiesDesignText, veinDetailsText } from "../bodies";
+import type { DesignTypeDTO, SampleBodyDTO, SampleDetail } from "../queries";
 import { AttachmentCard } from "./AttachmentsField";
 import { FileViewer, type ViewableFile } from "./FileViewer";
 
+const TYPE_SECTION: Record<DesignTypeDTO["type"], string> = {
+  ROY_BODY: "Roy Body Details",
+  KREOS: "Kreos Vein Details",
+  CARRARA: "Carrara Details",
+  VEIN: "Vein Details",
+  CHESSBOARD: "Chessboard Details",
+};
 
-/** Read-only, form-shaped view of everything recorded for a sample. */
+/** What a body recorded with the earlier form's Vein / Roy Body parts. */
+const bodyHasEarlier = (b: SampleBodyDTO) =>
+  b.hasVein !== null || !!b.mixerType || b.veinMethods.length > 0 || b.veinDetails.length > 0 || !!b.veinNotes || !!b.designRoyBody || !!b.veinRoyBody;
+
+/** Review page: everything recorded for a lab sample, in the order of the form. */
 export function SampleDetailView({ s }: { s: SampleDetail }) {
   const [viewing, setViewing] = useState<ViewableFile | null>(null);
-  const hasRoy = (list: { code: string | null }[]) => list.some((v) => v.code === "ROY_BODY");
-  let n = 0;
-  const idx = () => ++n;
+  let section = 0;
+  const next = () => ++section;
+  const showBodies = s.plainBody === true || s.designTypes.length > 0 || s.bodies.length > 0;
+  const perBodyDesign = s.bodies.length > 1 && new Set(s.bodies.map((b) => `${b.designCategory}|${b.designPatterns.map((p) => p.id).join()}`)).size > 1;
+  const earlierBodies = s.bodies.filter(bodyHasEarlier);
+  const earlier = s.physicalSamplePresent !== null || !!s.inwardEntry || s.otherPatterns.length > 0 || perBodyDesign || earlierBodies.length > 0;
+  const special = (t: DesignTypeDTO["type"]) => (t === "ROY_BODY" ? s.royBodies : t === "CHESSBOARD" ? s.chessboardBodies : []);
 
   return (
     <div className="space-y-4">
-      <Block index={idx()} title="Basic Information">
-        <Grid>
-          <Item label="S.No." value={s.serialNo} />
-          <Item label="Slab Number" value={s.slabNumber} />
-          <Item label="Date" value={formatDate(s.sampleDate)} />
-          <Item label="Design Name" value={s.designName} />
-          <Item label="Number of Bodies" value={s.numberOfBodies} />
-          <Item
-            label="Physical Sample Available?"
-            value={s.physicalSamplePresent === null ? null : s.physicalSamplePresent ? "Yes" : "No (Rectification)"}
-          />
-          {s.inwardEntry && (
-            <Item
-              label="Inward / Outward"
-              value={
-                <Link href={`/inward-outward/${s.inwardEntry.id}`} className="text-brand-2 underline">
-                  Serial No. {s.inwardEntry.serialNo}
-                </Link>
-              }
-            />
+      <Block index={next()} title="Basic Information">
+        <Pairs
+          items={[
+            ["Date", formatDate(s.sampleDate)],
+            ["S.No.", s.serialNo],
+            ["Slab Number", s.slabNumber],
+            ["Design Name", s.designName],
+          ]}
+        />
+        {s.status === "DRAFT" && <p className="mt-3 text-[13px] text-warn-fg">Saved as a draft with the earlier form.</p>}
+      </Block>
+
+      <Block index={next()} title="Design Type and Number of Bodies">
+        <Pairs
+          items={[
+            ["Plain Body", s.plainBody === null ? null : s.plainBody ? "Yes" : "No"],
+            ...(s.plainBody === false ? ([["Design Types", s.designTypes.map((t) => designType(t.type).label).join(", ")]] as [string, React.ReactNode][]) : []),
+            ["Number of Bodies (N)", s.numberOfBodies ?? (s.bodies.length || null)],
+          ]}
+        />
+      </Block>
+
+      {showBodies && (
+        <Block index={next()} title="Material Details">
+          {s.bodies.length === 0 ? (
+            <p className="text-sm text-ink-3">Not recorded.</p>
+          ) : (
+            <div className="space-y-4">
+              {s.legacyBodies && (
+                <p className="text-[13px] text-ink-2">Recorded with the earlier form as one set of materials for the whole sample — shown on every body.</p>
+              )}
+              {s.bodies.map((b) => (
+                <Card key={b.index} title={`Body ${b.index}`}>
+                  <MaterialsView f={b.main} />
+                </Card>
+              ))}
+            </div>
           )}
-          <Item label="Status" value={s.status === "DRAFT" ? "Draft" : "Saved"} />
-        </Grid>
-      </Block>
+        </Block>
+      )}
 
-      <Block index={idx()} title="Bodies">
-        {s.bodies.length === 0 ? (
-          <Empty text="Number of Bodies not recorded." />
-        ) : (
-          <div className="space-y-4">
-            {s.legacyBodies && <LegacyBodiesNote />}
-            {s.bodies.map((b) => (
-              <BodyViewCard key={b.index} index={b.index}>
-                <BodyViewPart title="Material Choices & Pigments">
-                  <FormulationView f={b.main} />
-                </BodyViewPart>
-                <BodyViewPart title="Design">
-                  <Grid>
-                    <Item label="Design" value={b.designCategory === "PLAIN_BODY" ? "Plain Body" : b.designCategory === "NON_PLAIN_BODY" ? "Non-Plain Body" : null} />
-                    {b.designCategory === "NON_PLAIN_BODY" && <Item label="Design Pattern(s)" value={b.designPatterns.map((p) => p.label).join(", ")} wide />}
-                  </Grid>
-                  {b.designCategory === "NON_PLAIN_BODY" && hasRoy(b.designPatterns) && (
-                    <Nested title={`Roy Body Formulation — Design (Body ${b.index})`}>
-                      <RoyBodyView f={b.designRoyBody} />
-                    </Nested>
-                  )}
-                </BodyViewPart>
-                <BodyViewPart title="Vein">
-                  <Grid>
-                    <Item label="Vein" value={b.hasVein === null ? null : b.hasVein ? "Yes" : "No"} />
-                    <Item label="Mixer Type" value={b.mixerType?.label} />
-                    {b.hasVein !== false && <Item label="How Vein Introduced" value={b.veinMethods.map((m) => m.label).join(", ")} wide />}
-                    {b.hasVein !== false && <Item label="Vein details" value={b.veinNotes} wide />}
-                  </Grid>
-                  {b.hasVein !== false && hasRoy(b.veinMethods) && (
-                    <Nested title={`Roy Body Formulation — Vein (Body ${b.index})`}>
-                      <FormulationView f={b.veinRoyBody} />
-                    </Nested>
-                  )}
-                </BodyViewPart>
-                <BodyViewPart title={`L, a, b Measurements — Body ${b.index}`}>
-                  <BodyLabTable
-                    rows={[
-                      { title: "Post Press", value: b.postPress },
-                      { title: "Post Polish", value: b.postPolish, dot: "accent" },
-                    ]}
-                  />
-                </BodyViewPart>
-              </BodyViewCard>
-            ))}
-          </div>
-        )}
-      </Block>
+      {s.designTypes.map((t) => (
+        <Block key={t.type} index={next()} title={TYPE_SECTION[t.type]}>
+          <TypeView t={t} bodies={special(t.type)} />
+        </Block>
+      ))}
 
-      <Block index={idx()} title="Sample Output">
+      {showBodies && (
+        <Block index={next()} title="L, a, b Measurements">
+          <StageRowsView
+            rows={[
+              ...s.bodies.map((b) => ({ label: `Body ${b.index}`, postPress: b.postPress, postPolish: b.postPolish })),
+              ...s.royBodies.map((b) => ({ label: `Roy Body ${b.index}`, postPress: b.postPress, postPolish: b.postPolish })),
+              ...s.chessboardBodies.map((b) => ({ label: `Chessboard Body ${b.index}`, postPress: b.postPress, postPolish: b.postPolish })),
+            ]}
+          />
+        </Block>
+      )}
+
+      <Block index={next()} title="Sample Output">
         {s.attachments.length ? (
           <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {s.attachments.map((a) => (
@@ -102,15 +105,65 @@ export function SampleDetailView({ s }: { s: SampleDetail }) {
             ))}
           </ul>
         ) : (
-          <Empty text="No files attached." />
-        )}
-        {s.remarks && (
-          <div className="mt-4">
-            <p className="label">Remarks</p>
-            <p className="whitespace-pre-wrap">{s.remarks}</p>
-          </div>
+          <p className="text-sm text-ink-3">No files attached.</p>
         )}
       </Block>
+
+      <Block index={next()} title="Remarks">
+        {s.remarks ? <p className="text-[15px] break-words whitespace-pre-wrap">{s.remarks}</p> : <p className="text-sm text-ink-3">Not recorded.</p>}
+      </Block>
+
+      {earlier && (
+        <Block index={next()} title="Recorded with the earlier form">
+          <div className="space-y-4">
+            <Pairs
+              items={[
+                ["Physical Sample Available?", s.physicalSamplePresent === null ? null : s.physicalSamplePresent ? "Yes" : "No (Rectification)"],
+                [
+                  "Inward / Outward",
+                  s.inwardEntry ? (
+                    <Link href={`/inward-outward/${s.inwardEntry.id}`} className="font-semibold text-accent underline">
+                      S.No. {s.inwardEntry.serialNo}
+                    </Link>
+                  ) : null,
+                ],
+                ...(perBodyDesign
+                  ? ([["Design per body", bodiesDesignText(s.bodies.map((b) => ({ designCategory: b.designCategory, patterns: b.designPatterns })))]] as [string, React.ReactNode][])
+                  : []),
+                ...(s.otherPatterns.length ? ([["Other design patterns", s.otherPatterns.map((p) => p.label).join(", ")]] as [string, React.ReactNode][]) : []),
+              ]}
+            />
+            {earlierBodies.map((b) => (
+              <Card key={b.index} title={`Body ${b.index}`} tone="accent">
+                <div className="space-y-4">
+                  {(b.hasVein !== null || b.mixerType || b.veinMethods.length > 0 || b.veinDetails.length > 0 || b.veinNotes) && (
+                    <Pairs
+                      items={[
+                        ["Vein", b.hasVein === null ? null : b.hasVein ? "Yes" : "No"],
+                        ["Mixer Type", b.mixerType?.label],
+                        ["How Vein Introduced", b.veinMethods.map((m) => m.label).join(", ")],
+                        ["Vein details", veinDetailsText(b.veinDetails, b.veinNotes)],
+                      ]}
+                    />
+                  )}
+                  {b.designRoyBody && (
+                    <div>
+                      <p className="mb-2 text-[13px] font-bold">Roy Body Formulation — Design</p>
+                      <RoyBodyView f={b.designRoyBody} />
+                    </div>
+                  )}
+                  {b.veinRoyBody && (
+                    <div>
+                      <p className="mb-2 text-[13px] font-bold">Roy Body Formulation — Vein</p>
+                      <FormulationView f={b.veinRoyBody} />
+                    </div>
+                  )}
+                </div>
+              </Card>
+            ))}
+          </div>
+        </Block>
+      )}
 
       <p className="px-1 text-[12px] text-ink-3">
         Created {formatDateTime(s.createdAt)}
@@ -123,44 +176,101 @@ export function SampleDetailView({ s }: { s: SampleDetail }) {
   );
 }
 
-export function Block({ index, title, children }: { index: number; title: string; children: React.ReactNode }) {
+function TypeView({ t, bodies }: { t: DesignTypeDTO; bodies: SampleDetail["royBodies"] }) {
+  const def = designType(t.type);
+  if (def.special) {
+    return (
+      <div className="space-y-4">
+        <Pairs items={[[def.special.countLabel, t.bodyCount ?? (bodies.length || null)]]} />
+        {bodies.map((b) => (
+          <Card key={b.index} title={`${def.special!.bodyLabel} ${b.index}`}>
+            <MaterialsView f={b.materials} />
+          </Card>
+        ))}
+      </div>
+    );
+  }
+  const vein = t.type === "KREOS" || t.type === "VEIN";
   return (
-    <section className="card break-inside-avoid">
-      <header className="flex items-center gap-3 border-b border-line px-4 py-3 sm:px-5">
-        <span className="flex size-7 items-center justify-center rounded-full bg-brand text-xs font-bold text-white">{index}</span>
-        <h3 className="text-[15px] font-bold">{title}</h3>
-      </header>
-      <div className="px-4 py-4 sm:px-5">{children}</div>
+    <div className="space-y-4">
+      {vein && (
+        <Pairs
+          items={[
+            ["Vein Present", t.veinPresent === null ? null : t.veinPresent ? "Yes" : "No"],
+            ...(t.veinPresent
+              ? ([
+                  ["Mixer Type", t.mixerType?.label],
+                  ["Vein Details", t.veinDetails.map((v) => v.label).join(", ")],
+                ] as [string, React.ReactNode][])
+              : []),
+          ]}
+        />
+      )}
+      {(t.type === "CARRARA" || (vein && t.veinPresent)) && (
+        <Colours title={t.type === "CARRARA" ? "Carrara Colors Used" : t.type === "KREOS" ? "Kreos Vein Colors Used" : "Vein Colors Used"} colours={t.colours} />
+      )}
+    </div>
+  );
+}
+
+function Colours({ title, colours }: { title: string; colours: DesignTypeDTO["colours"] }) {
+  return (
+    <div>
+      <p className="mb-1 text-[12px] font-semibold tracking-wide text-ink-3 uppercase">{title}</p>
+      {colours.length ? (
+        <table className="w-full max-w-md text-[14px]">
+          <thead>
+            <tr>
+              <th className="th">Colour</th>
+              <th className="th text-right">Quantity (gm)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {colours.map((c) => (
+              <tr key={c.colour.id}>
+                <td className="td font-semibold">{c.colour.label}</td>
+                <td className="td text-right tabular-nums">{formatNumber(c.quantity)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p className="text-sm text-ink-3">—</p>
+      )}
+    </div>
+  );
+}
+
+function Card({ title, tone = "brand", children }: { title: string; tone?: "brand" | "accent"; children: React.ReactNode }) {
+  return (
+    <section aria-label={title} className={cn("overflow-hidden rounded-xl border bg-shell", tone === "brand" ? "border-brand/25" : "border-accent/40")}>
+      <h3 className={cn("px-4 py-2.5 text-[14px] font-bold tracking-widest text-white uppercase", tone === "brand" ? "bg-brand" : "bg-accent")}>{title}</h3>
+      <div className="p-3 sm:p-4">{children}</div>
     </section>
   );
 }
 
-export function Nested({ title, children }: { title: string; children: React.ReactNode }) {
+function Pairs({ items }: { items: [string, React.ReactNode][] }) {
   return (
-    <div className="mt-4 rounded-xl border border-accent/40 bg-accent-bg/40 p-4">
-      <h4 className="mb-3 flex items-center gap-2 text-[14px] font-bold">
-        <span className="flex size-6 items-center justify-center rounded-full bg-accent text-[11px] font-bold text-white">R</span>
-        {title}
-      </h4>
-      {children}
-    </div>
+    <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+      {items.map(([label, value]) => (
+        <div key={label} className="min-w-0">
+          <dt className="text-[12px] font-semibold tracking-wide text-ink-3 uppercase">{label}</dt>
+          <dd className="mt-0.5 text-[15px] break-words">{value === null || value === undefined || value === "" ? "—" : value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
-export function Grid({ children }: { children: React.ReactNode }) {
-  return <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">{children}</dl>;
-}
-
-export function Item({ label, value, wide }: { label: string; value: React.ReactNode; wide?: boolean }) {
-  const empty = value === null || value === undefined || value === "";
+function Block({ index, title, children }: { index: number; title: string; children: React.ReactNode }) {
   return (
-    <div className={cn(wide && "sm:col-span-2")}>
-      <dt className="label">{label}</dt>
-      <dd className={cn("min-h-6 text-[15px]", empty ? "text-ink-3" : "font-semibold")}>{empty ? "—" : value}</dd>
-    </div>
+    <section className="card break-inside-avoid">
+      <header className="flex items-center gap-3 border-b border-line px-4 py-3 sm:px-5">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-brand text-xs font-bold text-white">{index}</span>
+        <h2 className="text-[15px] font-bold">{title}</h2>
+      </header>
+      <div className="px-4 py-4 sm:px-5">{children}</div>
+    </section>
   );
-}
-
-export function Empty({ text = "Not recorded." }: { text?: string }) {
-  return <p className="text-sm text-ink-3">{text}</p>;
 }

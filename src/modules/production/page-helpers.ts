@@ -1,7 +1,15 @@
 import "server-only";
 import { can } from "@/lib/permissions";
 import type { CurrentUser } from "@/lib/session";
-import type { ProductionFormPermissions } from "./components/ProductionForm";
+
+/** What the signed-in role may do in the Production Sample form. */
+export interface ProductionFormPermissions {
+  overrideNumbers: boolean;
+  changeDate: boolean;
+  addMaster: boolean;
+  upload: boolean;
+  removeFiles: boolean;
+}
 
 export function productionFormPermissions(user: CurrentUser): ProductionFormPermissions {
   return {

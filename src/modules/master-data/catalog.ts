@@ -6,16 +6,20 @@
  * Shared by the seed script, the server and the client, so it must stay free of
  * server-only imports.
  */
+import { MAX_LABEL_LENGTH } from "../../lib/normalize";
+
 export const MASTER = {
   RESIN: "RESIN",
   GRIT: "GRIT",
   GRIT_SIZE: "GRIT_SIZE",
   FILLER: "FILLER",
   PIGMENT: "PIGMENT",
+  ADDITIVE: "ADDITIVE",
   DESIGN_PATTERN: "DESIGN_PATTERN",
   DESIGN_NAME: "DESIGN_NAME",
   MIXER_TYPE: "MIXER_TYPE",
   VEIN_METHOD: "VEIN_METHOD",
+  VEIN_DETAIL: "VEIN_DETAIL",
   COMPANY: "COMPANY",
 } as const;
 
@@ -24,6 +28,11 @@ export type MasterCode = (typeof MASTER)[keyof typeof MASTER];
 /** Value codes with behaviour attached. */
 export const VALUE_CODE = {
   ROY_BODY: "ROY_BODY",
+  // Design types of the Inward / Outward form (Plain Body – No).
+  KREOS: "KREOS",
+  CARRARA: "CARRARA",
+  VEIN: "VEIN",
+  CHESSBOARD: "CHESSBOARD",
 } as const;
 
 /**
@@ -40,40 +49,39 @@ export interface CatalogEntry {
   values: Array<{ label: string; code?: string }>;
   /** Position in Master Data; defaults to the entry's place in CATALOG. */
   sortOrder?: number;
+  /** Longest value allowed (default MAX_LABEL_LENGTH). */
+  maxLabel?: number;
 }
 
 /** Where a list sits in Master Data. */
 export const catalogSortOrder = (entry: CatalogEntry, index: number) => entry.sortOrder ?? (index + 1) * 10;
 
+// Resins, Grits, Grit Sizes and Fillers start empty: the Lab Sample form lets
+// people type them, and each new value becomes an option for later entries.
 export const CATALOG: CatalogEntry[] = [
   {
     code: MASTER.RESIN,
     name: "Resins",
     description: "Resin suppliers / grades used in formulations.",
-    values: [{ label: "INEOS" }],
+    values: [],
   },
   {
     code: MASTER.GRIT,
     name: "Grits",
     description: "Grit materials.",
-    values: [
-      { label: "QUARTZ SM" },
-      { label: "QUARTZ PM" },
-      { label: "CRISTOBALITE" },
-      { label: "GLASS" },
-    ],
+    values: [],
   },
   {
     code: MASTER.GRIT_SIZE,
     name: "Grit Sizes",
     description: "Particle size ranges for grits.",
-    values: [{ label: "0.1–0.4 mm" }, { label: "0.3–0.7 mm" }, { label: "0.6–1.2 mm" }],
+    values: [],
   },
   {
     code: MASTER.FILLER,
     name: "Fillers",
     description: "Filler materials.",
-    values: [{ label: "LY" }, { label: "LG" }, { label: "CRISTOBALITE" }, { label: "GLASS" }],
+    values: [],
   },
   {
     code: MASTER.PIGMENT,
@@ -82,14 +90,22 @@ export const CATALOG: CatalogEntry[] = [
     values: [{ label: "White" }, { label: "Grey" }, { label: "Black" }],
   },
   {
+    code: MASTER.ADDITIVE,
+    name: "Additives",
+    description: "Additives used in formulations (Lab Sample form). Grows with use.",
+    values: [],
+    // Right after Pigments / Colours, also on installs that already have the other lists.
+    sortOrder: 55,
+  },
+  {
     code: MASTER.DESIGN_PATTERN,
     name: "Design Patterns",
     description: "Non-plain body design patterns. ROY BODY opens the Roy Body formulation.",
     values: [
-      { label: "CARRARA" },
-      { label: "VEIN" },
-      { label: "KREOS" },
-      { label: "CHESSBOARD" },
+      { label: "CARRARA", code: VALUE_CODE.CARRARA },
+      { label: "VEIN", code: VALUE_CODE.VEIN },
+      { label: "KREOS", code: VALUE_CODE.KREOS },
+      { label: "CHESSBOARD", code: VALUE_CODE.CHESSBOARD },
       { label: "ROY BODY", code: VALUE_CODE.ROY_BODY },
     ],
   },
@@ -119,9 +135,24 @@ export const CATALOG: CatalogEntry[] = [
     ],
   },
   {
+    code: MASTER.VEIN_DETAIL,
+    name: "Vein Details",
+    description: "Vein details (colour, thickness, direction …) — picked like Color Used. Grows with use.",
+    values: [],
+    // Right after Vein Introduction Methods, also on installs that already have the other lists.
+    sortOrder: 95,
+    // Details are short phrases rather than one-word names.
+    maxLabel: 200,
+  },
+  {
     code: MASTER.COMPANY,
     name: "Companies",
     description: "Companies samples come from or go to (Inward / Outward). Grows with use.",
     values: [],
   },
 ];
+
+/** Longest value a list accepts. */
+export function labelLimit(code: string): number {
+  return CATALOG.find((c) => c.code === code)?.maxLabel ?? MAX_LABEL_LENGTH;
+}

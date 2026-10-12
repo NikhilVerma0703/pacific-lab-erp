@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const s = await getProductionDetail((await params).id);
-  return { title: s ? `Production S. No. ${s.serialNo}` : "Production Sample" };
+  return { title: s ? `Production S.No. ${s.serialNo}` : "Production Sample" };
 }
 
 export default async function ProductionDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -24,7 +24,7 @@ export default async function ProductionDetailPage({ params }: { params: Promise
   return (
     <>
       <PageHeader
-        title={`Production Sample S. No. ${s.serialNo}`}
+        title={`Production Sample S.No. ${s.serialNo}`}
         description={`${s.slabNumber ? `Slab ${s.slabNumber} · ` : ""}${formatDate(s.sampleDate)}${s.designName ? ` · ${s.designName}` : ""}`}
         actions={
           <>

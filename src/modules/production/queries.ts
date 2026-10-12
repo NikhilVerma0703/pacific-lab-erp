@@ -1,12 +1,17 @@
 import "server-only";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import type { MasterRef } from "@/modules/master-data/types";
-import { bodiesDesignText } from "@/modules/samples/bodies";
+import { emptyLabReading } from "@/modules/forms/fields";
 import { dec, type AttachmentDTO, type LabValueDTO, type ValueDTO } from "@/modules/samples/queries";
-import { emptyLabRow } from "@/modules/samples/schema";
 import { productionInclude } from "./service";
 import type { ProductionFormInput } from "./schema";
+
+/*
+ * Production samples — reading them back. `ProductionDetail` is also what
+ * Downloads exports, so it keeps everything an entry may hold, including the
+ * per-body Design (and Roy Body) recorded by the earlier form; the rebuilt
+ * form, register and Review page use Basic Information and Body 1 … N L, a, b.
+ */
 
 // ── DTOs (plain JSON — safe to pass to client components) ────────────────────
 
@@ -138,45 +143,24 @@ export async function getProductionDetail(id: string): Promise<ProductionDetail 
   return s ? toProductionDetail(s) : null;
 }
 
-/** Master values the entry points at (so disabled ones still show when editing). */
-export const productionValueIds = (d: ProductionDetail) => [
-  ...new Set([...(d.designNameRef ? [d.designNameRef.id] : []), ...d.bodies.flatMap((b) => b.designPatterns.map((p) => p.id))]),
-];
+/** Master values the entry points at (so a disabled Design Name still shows when editing). */
+export const productionValueIds = (d: ProductionDetail) => (d.designNameRef ? [d.designNameRef.id] : []);
 
 // ── form prefill ─────────────────────────────────────────────────────────────
 
 const str = (v: string | null) => (v === null ? "" : String(Number(v)));
-const rowInput = (v: LabValueDTO | null) => (v ? { l: str(v.l), a: str(v.a), b: str(v.b) } : emptyLabRow());
+const readingInput = (v: LabValueDTO | null) => (v ? { l: str(v.l), a: str(v.a), b: str(v.b) } : emptyLabReading());
 
-const labInput = (readings: ReadingDTO[], n: number, stage: Stage) =>
-  Array.from({ length: n }, (_, i) => {
-    const m = readings.find((x) => x.stage === stage && x.bodyIndex === i + 1);
-    return m ? { l: str(m.l), a: str(m.a), b: str(m.b) } : emptyLabRow();
-  });
-
+/** A saved entry back into the form: Basic Information, Body 1 … N readings, files, remarks. */
 export function toProductionFormInput(d: ProductionDetail): ProductionFormInput {
-  const ref = (v: ValueDTO): MasterRef => ({ id: v.id, label: v.label });
   return {
     sampleDate: d.sampleDate,
     serialNo: String(d.serialNo),
     slabNumber: d.slabNumber === null ? "" : String(d.slabNumber),
     // A name typed before the Design Names list existed opens as a new (Other…) name.
-    designName: d.designNameRef ? ref(d.designNameRef) : d.designName ? { label: d.designName } : null,
+    designName: d.designNameRef ? { id: d.designNameRef.id, label: d.designNameRef.label } : d.designName ? { label: d.designName } : null,
     numberOfBodies: d.numberOfBodies !== null ? String(d.numberOfBodies) : d.bodies.length ? String(d.bodies.length) : "",
-    bodies: d.bodies.map((b) => {
-      const rn = b.royBody?.numberOfBodies ?? 0;
-      return {
-        designCategory: b.designCategory ?? "",
-        designPatterns: b.designPatterns.map(ref),
-        designRoyBody: {
-          numberOfBodies: b.royBody?.numberOfBodies == null ? "" : String(b.royBody.numberOfBodies),
-          postPress: labInput(b.royBody?.readings ?? [], rn, "POST_PRESS"),
-          postPolish: labInput(b.royBody?.readings ?? [], rn, "POST_POLISH"),
-        },
-        postPress: rowInput(b.postPress),
-        postPolish: rowInput(b.postPolish),
-      };
-    }),
+    bodies: d.bodies.map((b) => ({ postPress: readingInput(b.postPress), postPolish: readingInput(b.postPolish) })),
     attachmentIds: d.attachments.map((a) => a.id),
     remarks: d.remarks ?? "",
   };
@@ -191,8 +175,8 @@ export interface RegisterRow {
   sampleDate: string;
   designName: string | null;
   numberOfBodies: number | null;
-  design: string;
-  bodies: ProductionBodyDTO[];
+  /** Body 1 … N: Post Press and Post Polish L, a, b. */
+  bodies: { index: number; postPress: LabValueDTO | null; postPolish: LabValueDTO | null }[];
   files: number;
   remarks: string | null;
 }
@@ -219,8 +203,7 @@ export async function getProductionRegister(page = 1): Promise<{ rows: RegisterR
       sampleDate: d.sampleDate,
       designName: d.designName,
       numberOfBodies: d.numberOfBodies,
-      design: bodiesDesignText(d.bodies.map((b) => ({ designCategory: b.designCategory, patterns: b.designPatterns }))),
-      bodies: d.bodies,
+      bodies: d.bodies.map((b) => ({ index: b.index, postPress: b.postPress, postPolish: b.postPolish })),
       files: d.attachments.length,
       remarks: d.remarks,
     };

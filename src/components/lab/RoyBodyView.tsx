@@ -1,6 +1,7 @@
 "use client";
 
 import { cn, formatNumber } from "@/lib/utils";
+import { veinDetailsText } from "@/modules/samples/bodies";
 import type { FormulationDTO } from "@/modules/samples/queries";
 import { FormulationView } from "./FormulationView";
 
@@ -9,7 +10,7 @@ export function RoyBodyView({ f }: { f?: FormulationDTO | null }) {
   if (!f) return <p className="text-sm text-ink-3">Not recorded.</p>;
   const n = f.numberOfBodies ?? 0;
   const showVeinDetails = f.hasVein !== false;
-  const nestedRoy = f.veinMethods.some((m) => m.code === "ROY_BODY");
+  const nestedRoy = showVeinDetails && f.veinMethods.some((m) => m.code === "ROY_BODY");
 
   return (
     <div className="space-y-4">
@@ -23,11 +24,12 @@ export function RoyBodyView({ f }: { f?: FormulationDTO | null }) {
         <Pairs
           items={[
             ["Vein", f.hasVein === null ? null : f.hasVein ? "Yes" : "No"],
-            ["Mixer Type", f.mixerType?.label],
+            // No vein → no Mixer Type, methods or details.
             ...(showVeinDetails
               ? ([
+                  ["Mixer Type", f.mixerType?.label],
                   ["How Vein Introduced", f.veinMethods.map((m) => m.label).join(", ")],
-                  ["Vein details", f.veinNotes],
+                  ["Vein details", veinDetailsText(f.veinDetails, f.veinNotes)],
                 ] as [string, React.ReactNode][])
               : []),
           ]}

@@ -8,7 +8,7 @@ import { getMasterOptions } from "@/modules/master-data/service";
 import { ProductionForm } from "@/modules/production/components/ProductionForm";
 import { productionFormPermissions } from "@/modules/production/page-helpers";
 import { getProductionDetail, productionValueIds, toProductionFormInput } from "@/modules/production/queries";
-import { uploadLimitMb } from "@/modules/samples/page-helpers";
+import { maxUploadMb } from "@/lib/uploads";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Edit Production Sample" };
@@ -23,7 +23,7 @@ export default async function EditProductionPage({ params }: { params: Promise<{
   return (
     <>
       <PageHeader
-        title={`Edit Production Sample S. No. ${s.serialNo}`}
+        title={`Edit Production Sample S.No. ${s.serialNo}`}
         description="Change any value and save. The previous version is kept in the audit log."
         actions={
           <Link href="/production-sample#register" className="btn-secondary">
@@ -39,7 +39,7 @@ export default async function EditProductionPage({ params }: { params: Promise<{
         attachments={s.attachments}
         options={options}
         permissions={productionFormPermissions(user)}
-        maxUploadMb={uploadLimitMb()}
+        maxUploadMb={maxUploadMb()}
       />
     </>
   );

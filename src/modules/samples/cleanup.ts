@@ -6,8 +6,8 @@ import { storage } from "@/lib/storage";
 export async function cleanupOrphanUploads(hours = 24): Promise<number> {
   const cutoff = new Date(Date.now() - hours * 3600_000);
   const orphans = await prisma.sampleAttachment.findMany({
-    // Unlinked = attached to neither a lab sample nor a production sample.
-    where: { sampleId: null, productionSampleId: null, createdAt: { lt: cutoff } },
+    // Unlinked = attached to no lab sample, production sample or Inward / Outward entry.
+    where: { sampleId: null, productionSampleId: null, inwardEntryId: null, createdAt: { lt: cutoff } },
     select: { id: true, storageKey: true },
     take: 500,
   });
@@ -15,7 +15,9 @@ export async function cleanupOrphanUploads(hours = 24): Promise<number> {
     await storage().delete(o.storageKey).catch((e) => console.error("orphan delete", o.storageKey, e));
   }
   if (orphans.length) {
-    await prisma.sampleAttachment.deleteMany({ where: { id: { in: orphans.map((o) => o.id) }, sampleId: null, productionSampleId: null } });
+    await prisma.sampleAttachment.deleteMany({
+      where: { id: { in: orphans.map((o) => o.id) }, sampleId: null, productionSampleId: null, inwardEntryId: null },
+    });
   }
   return orphans.length;
 }

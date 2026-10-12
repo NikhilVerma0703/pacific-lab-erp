@@ -1,6 +1,5 @@
 import "server-only";
 import { prisma, type Tx } from "@/lib/db";
-import { NUMBERING } from "@/modules/samples/numbering";
 
 /**
  * Production Sample S.No. and Slab Number — their own series, separate from
@@ -11,6 +10,9 @@ import { NUMBERING } from "@/modules/samples/numbering";
  * the final guarantee.
  */
 const LOCK_KEY = 4_471_003; // "production sample numbering"
+
+/** Start values and step of the series. */
+const NUMBERING = { serialStart: 1, slabStart: 1, step: 1 } as const;
 
 type Db = Tx | typeof prisma;
 

@@ -5,10 +5,9 @@ import { audit } from "@/lib/audit";
 import { can } from "@/lib/permissions";
 import { plantToday } from "@/lib/plant-time";
 import type { CurrentUser } from "@/lib/session";
-import { MASTER, VALUE_CODE } from "@/modules/master-data/catalog";
+import { readingIsEmpty } from "@/modules/forms/fields";
+import { MASTER } from "@/modules/master-data/catalog";
 import { MasterValueError, resolveMasterRef } from "@/modules/master-data/service";
-import type { MasterRef } from "@/modules/master-data/types";
-import { codesOf } from "@/modules/samples/service";
 import { lockProductionNumbering, nextProductionSerial, nextProductionSlab } from "./numbering";
 import type { ProductionFormData } from "./schema";
 
@@ -23,33 +22,15 @@ export class ProductionSaveError extends Error {
 
 const dateOnly = (s: string) => new Date(`${s}T00:00:00.000Z`);
 
-type LabRow = ProductionFormData["bodies"][number]["designRoyBody"]["postPress"][number];
-
-/** L/a/b rows worth storing: one per body per stage, only where something was measured. */
-function measurementRows(
-  productionSampleId: string,
-  part: "MAIN" | "ROY_BODY",
-  n: number,
-  postPress: LabRow[],
-  postPolish: LabRow[],
-): Prisma.ProductionMeasurementCreateManyInput[] {
-  const rows: Prisma.ProductionMeasurementCreateManyInput[] = [];
-  for (const [stage, list] of [
-    ["POST_PRESS", postPress],
-    ["POST_POLISH", postPolish],
-  ] as const) {
-    list.slice(0, n).forEach((r, i) => {
-      if (r.l === null && r.a === null && r.b === null) return;
-      rows.push({ productionSampleId, part, stage, bodyIndex: i + 1, l: r.l, a: r.a, b: r.b });
-    });
-  }
-  return rows;
-}
-
 /**
- * Create or update a production sample, with everything under it, in one
- * transaction. On update the child rows are replaced wholesale; the previous
- * version is kept in the audit log.
+ * Create or update a production sample in one transaction:
+ * Basic Information, the L, a, b of Body 1 … N (Post Press / Post Polish),
+ * Sample Output files and Remarks. On update the readings are replaced; the
+ * previous version is kept in the audit log.
+ *
+ * Entries saved with the earlier form may also carry a Design per body (and a
+ * Roy Body). The rebuilt form does not show it; it is left as it was for
+ * Body 1 … N (Downloads still export it) and removed for bodies above N.
  */
 export async function saveProductionSample(args: {
   id?: string;
@@ -78,14 +59,6 @@ export async function saveProductionSample(args: {
           : null;
         if (id && !existing) throw new ProductionSaveError("This entry no longer exists — it may have been deleted.");
 
-        const resolveIn = async (code: typeof MASTER.DESIGN_PATTERN | typeof MASTER.DESIGN_NAME, ref: MasterRef | null | undefined) => {
-          if (ref && !ref.id && ref.label.trim() && !canAddMaster) {
-            throw new ProductionSaveError(`You cannot add new list values (“${ref.label}”). Pick one from the list.`);
-          }
-          return resolveMasterRef(tx, code, ref, user.id);
-        };
-        const resolve = (ref: MasterRef | null | undefined) => resolveIn(MASTER.DESIGN_PATTERN, ref);
-
         // ── numbers ──────────────────────────────────────────────────────────
         let serialNo: number;
         let slabNumber: number | null;
@@ -99,11 +72,11 @@ export async function saveProductionSample(args: {
         const fieldErrors: Record<string, string> = {};
         const notMe = existing ? { NOT: { id: existing.id } } : {};
         if (await tx.productionSample.findFirst({ where: { serialNo, ...notMe }, select: { id: true } })) {
-          fieldErrors.serialNo = `S. No. ${serialNo} is already used by another production sample.`;
+          fieldErrors.serialNo = `S.No. ${serialNo} is already used by another production sample.`;
         }
         if (slabNumber !== null) {
           const clash = await tx.productionSample.findFirst({ where: { slabNumber, ...notMe }, select: { serialNo: true } });
-          if (clash) fieldErrors.slabNumber = `Slab ${slabNumber} is already used by S. No. ${clash.serialNo}.`;
+          if (clash) fieldErrors.slabNumber = `Slab ${slabNumber} is already used by S.No. ${clash.serialNo}.`;
         }
         if (Object.keys(fieldErrors).length) {
           throw new ProductionSaveError("Duplicate number — see the highlighted fields.", fieldErrors);
@@ -116,18 +89,21 @@ export async function saveProductionSample(args: {
             ? existing.sampleDate
             : dateOnly(plantToday());
 
+        // ── Design Name (Design Names list) ──────────────────────────────────
+        if (data.designName && !data.designName.id && data.designName.label.trim() && !canAddMaster) {
+          throw new ProductionSaveError(`You cannot add new list values (“${data.designName.label}”). Pick one from the list.`);
+        }
+        const designNameId = await resolveMasterRef(tx, MASTER.DESIGN_NAME, data.designName, user.id);
+
+        const n = data.numberOfBodies ?? 0;
         const base = {
           serialNo,
           slabNumber,
           sampleDate,
-          designNameId: await resolveIn(MASTER.DESIGN_NAME, data.designName),
-          // Moved into the Design Names list by this save.
+          designNameId,
+          // A name typed before the Design Names list existed is now the list value.
           legacyDesignName: null,
           numberOfBodies: data.numberOfBodies,
-          // Design now lives on each body (ProductionBody); the entry-level
-          // columns only remain for entries saved before bodies existed.
-          designCategory: null,
-          royNumberOfBodies: null,
           remarks: data.remarks,
           updatedById: user.id,
         };
@@ -137,54 +113,26 @@ export async function saveProductionSample(args: {
           : await tx.productionSample.create({ data: { ...base, createdById: user.id } });
 
         if (existing) {
-          await tx.productionDesignPattern.deleteMany({ where: { productionSampleId: sample.id } });
-          await tx.productionMeasurement.deleteMany({ where: { productionSampleId: sample.id } });
-          await tx.productionBody.deleteMany({ where: { productionSampleId: sample.id } });
+          await tx.productionMeasurement.deleteMany({ where: { productionSampleId: sample.id, part: "MAIN" } });
+          // Bodies above N go, with anything the earlier form recorded for them.
+          await tx.productionBody.deleteMany({ where: { productionSampleId: sample.id, bodyIndex: { gt: n } } });
+          await tx.productionMeasurement.deleteMany({ where: { productionSampleId: sample.id, part: "ROY_BODY", ownerBody: { gt: n } } });
         }
 
-        // Body 1 … n — each body's Design (+ Roy Body: n and L/a/b) and its own L/a/b.
-        const n = data.numberOfBodies ?? 0;
+        // ── L, a, b: Body 1 … N, Post Press / Post Polish ────────────────────
         const rows: Prisma.ProductionMeasurementCreateManyInput[] = [];
         for (const [k, body] of data.bodies.slice(0, n).entries()) {
-          const bodyIndex = k + 1;
-          const patternIds: string[] = [];
-          if (body.designCategory === "NON_PLAIN_BODY") {
-            for (const ref of body.designPatterns) {
-              const pid = await resolve(ref);
-              if (pid && !patternIds.includes(pid)) patternIds.push(pid);
-            }
-          }
-          const hasRoy = (await codesOf(tx, patternIds)).has(VALUE_CODE.ROY_BODY);
-          const row = await tx.productionBody.create({
-            data: {
-              productionSampleId: sample.id,
-              bodyIndex,
-              designCategory: body.designCategory,
-              royNumberOfBodies: hasRoy ? body.designRoyBody.numberOfBodies : null,
-            },
-          });
-          if (patternIds.length) {
-            await tx.productionBodyDesignPattern.createMany({
-              data: patternIds.map((patternId, i) => ({ bodyId: row.id, patternId, sortOrder: i })),
-            });
-          }
           for (const [stage, r] of [
             ["POST_PRESS", body.postPress],
             ["POST_POLISH", body.postPolish],
           ] as const) {
-            if (r.l === null && r.a === null && r.b === null) continue;
-            rows.push({ productionSampleId: sample.id, part: "MAIN", ownerBody: 0, stage, bodyIndex, l: r.l, a: r.a, b: r.b });
-          }
-          if (hasRoy) {
-            const roy = body.designRoyBody;
-            rows.push(
-              ...measurementRows(sample.id, "ROY_BODY", roy.numberOfBodies ?? 0, roy.postPress, roy.postPolish).map((m) => ({ ...m, ownerBody: bodyIndex })),
-            );
+            if (readingIsEmpty(r)) continue;
+            rows.push({ productionSampleId: sample.id, part: "MAIN", ownerBody: 0, stage, bodyIndex: k + 1, l: r.l, a: r.a, b: r.b });
           }
         }
         if (rows.length) await tx.productionMeasurement.createMany({ data: rows });
 
-        // ── attachments (Sample Output) ──────────────────────────────────────
+        // ── Sample Output (files) ────────────────────────────────────────────
         const wanted = new Set(data.attachmentIds);
         const current = existing?.attachments ?? [];
         const toRemove = current.filter((a) => !wanted.has(a.id));
@@ -209,7 +157,7 @@ export async function saveProductionSample(args: {
           entityType: "ProductionSample",
           entityId: sample.id,
           action: existing ? "UPDATE" : "CREATE",
-          summary: `Production S. No. ${serialNo}${slabNumber ? ` / Slab ${slabNumber}` : ""}`,
+          summary: `Production S.No. ${serialNo}${slabNumber ? ` / Slab ${slabNumber}` : ""}`,
           snapshot: JSON.parse(JSON.stringify(data)) as Prisma.InputJsonValue,
           userId: user.id,
         });
@@ -223,7 +171,7 @@ export async function saveProductionSample(args: {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
         const target = String((e.meta as { target?: unknown })?.target ?? "");
         if (target.includes("slab")) throw new ProductionSaveError("That slab number was just taken. Please save again.", { slabNumber: "Already used." });
-        throw new ProductionSaveError("That S. No. was just taken. Please save again.", { serialNo: "Already used." });
+        throw new ProductionSaveError("That S.No. was just taken. Please save again.", { serialNo: "Already used." });
       }
       throw e;
     });
@@ -238,7 +186,7 @@ export async function deleteProductionSample(id: string, user: CurrentUser): Pro
       entityType: "ProductionSample",
       entityId: id,
       action: "DELETE",
-      summary: `Deleted production S. No. ${snapshot.serialNo}${snapshot.slabNumber ? ` / Slab ${snapshot.slabNumber}` : ""}`,
+      summary: `Deleted production S.No. ${snapshot.serialNo}${snapshot.slabNumber ? ` / Slab ${snapshot.slabNumber}` : ""}`,
       snapshot: JSON.parse(JSON.stringify(snapshot)) as Prisma.InputJsonValue,
       userId: user.id,
     });

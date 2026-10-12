@@ -1,8 +1,9 @@
 import "server-only";
 import { Prisma } from "@prisma/client";
 import { prisma, type Tx } from "@/lib/db";
-import { cleanLabel, MAX_LABEL_LENGTH, normalizeKey } from "@/lib/normalize";
-import { CATALOG, catalogSortOrder, MASTER, RETIRED_CATEGORY_CODES, type MasterCode } from "./catalog";
+import { cleanLabel, compareLabels, normalizeKey } from "@/lib/normalize";
+import { backfillTypedValues } from "./backfill";
+import { CATALOG, catalogSortOrder, labelLimit, MASTER, RETIRED_CATEGORY_CODES, type MasterCode } from "./catalog";
 import type { MasterOption, MasterOptions, MasterRef } from "./types";
 
 /** Category ids by code, cached per process (categories rarely change). */
@@ -23,11 +24,14 @@ export async function categoryId(code: MasterCode, tx: Tx | typeof prisma = pris
   return id;
 }
 
+let catalogChecked = false;
+
 /**
  * Create any list of the catalog that the database does not have yet (empty —
- * its starting values still come from `npm run db:seed`). Returns true when
- * something was created. Runs outside any save transaction, so the new list
- * stays even if that save fails.
+ * its starting values still come from `npm run db:seed`), then move values
+ * typed before that list existed into it. Checked once per server process.
+ * Returns true when something was created. Runs outside any save transaction,
+ * so the new list stays even if that save fails.
  */
 async function ensureCatalogCategories(db: typeof prisma = prisma): Promise<boolean> {
   const have = new Set((await db.masterCategory.findMany({ select: { code: true } })).map((c) => c.code));
@@ -41,7 +45,16 @@ async function ensureCatalogCategories(db: typeof prisma = prisma): Promise<bool
     });
     created = true;
   }
-  if (created) categoryCache = null;
+  if (created) {
+    categoryCache = null;
+    try {
+      for (const line of await backfillTypedValues(db)) console.log(line);
+    } catch (e) {
+      // `npm run db:seed` does the same; the app works without it meanwhile.
+      console.error("master-data backfill", e);
+    }
+  }
+  catalogChecked = true;
   return created;
 }
 
@@ -50,11 +63,14 @@ async function ensureCatalogCategories(db: typeof prisma = prisma): Promise<bool
  * disabled value the sample already uses, so old records still display.
  */
 export async function getMasterOptions(includeIds: string[] = []): Promise<MasterOptions> {
+  if (!catalogChecked) await ensureCatalogCategories();
   const rows = await prisma.masterValue.findMany({
     where: { OR: [{ isActive: true }, { id: { in: includeIds } }], category: { isActive: true } },
-    select: { id: true, label: true, code: true, isActive: true, category: { select: { code: true } } },
+    select: { id: true, label: true, code: true, isActive: true, sortOrder: true, category: { select: { code: true } } },
     orderBy: [{ sortOrder: "asc" }, { label: "asc" }],
   });
+  // Same position → alphabetical ignoring case (the database may sort "Zebra" before "apple").
+  rows.sort((a, b) => a.sortOrder - b.sortOrder || compareLabels(a.label, b.label));
   const out = Object.fromEntries(Object.values(MASTER).map((c) => [c, [] as MasterOption[]])) as MasterOptions;
   for (const r of rows) {
     const list = out[r.category.code as MasterCode];
@@ -91,8 +107,8 @@ export async function resolveMasterRef(
 
   const label = cleanLabel(ref.label ?? "");
   if (!label) return null;
-  if (label.length > MAX_LABEL_LENGTH) {
-    throw new MasterValueError(`${listName(code)}: “${label.slice(0, 30)}…” is too long (max ${MAX_LABEL_LENGTH}).`);
+  if (label.length > labelLimit(code)) {
+    throw new MasterValueError(`${listName(code)}: “${label.slice(0, 30)}…” is too long (max ${labelLimit(code)}).`);
   }
   const key = normalizeKey(label);
   const save = ref.save !== false;
@@ -181,10 +197,21 @@ export async function listValues(categoryCode: string) {
           samplesAsDesignName: true,
           inwardsAsDesignName: true,
           productionsAsDesignName: true,
+          bodyVeinDetailUses: true,
+          formulationVeinDetailUses: true,
+          inwardDesignMixerUses: true,
+          inwardDesignVeinDetailUses: true,
+          inwardDesignColourUses: true,
+          sampleDesignMixerUses: true,
+          sampleDesignVeinDetailUses: true,
+          sampleDesignColourUses: true,
+          formulationAdditiveUses: true,
         },
       },
     },
   });
+  // Same position → alphabetical ignoring case.
+  values.sort((a, b) => Number(b.isActive) - Number(a.isActive) || a.sortOrder - b.sortOrder || compareLabels(a.label, b.label));
   return {
     category: { id: cat.id, code: cat.code, name: cat.name, description: cat.description },
     values: values.map((v) => {
@@ -217,7 +244,16 @@ export async function listValues(categoryCode: string) {
           c.productionBodyPatternUses +
           c.samplesAsDesignName +
           c.inwardsAsDesignName +
-          c.productionsAsDesignName,
+          c.productionsAsDesignName +
+          c.bodyVeinDetailUses +
+          c.formulationVeinDetailUses +
+          c.inwardDesignMixerUses +
+          c.inwardDesignVeinDetailUses +
+          c.inwardDesignColourUses +
+          c.sampleDesignMixerUses +
+          c.sampleDesignVeinDetailUses +
+          c.sampleDesignColourUses +
+          c.formulationAdditiveUses,
       };
     }),
   };

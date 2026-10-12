@@ -108,24 +108,33 @@ model MasterValue {
   createdBy User?          @relation("MasterValueCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
   // Reverse relations — they are what makes a value "in use".
-  samplesAsMixer            LabSample[]                   @relation("SampleMixerType")
-  componentsAsMaterial      FormulationComponent[]        @relation("ComponentMaterial")
-  componentsAsSize          FormulationComponent[]        @relation("ComponentSize")
-  designPatternUses         SampleDesignPattern[]
-  veinMethodUses            SampleVeinMethod[]
-  inwardCompanyUses         InwardOutwardEntry[]
-  inwardPatternUses         InwardDesignPattern[]
-  formulationsAsMixer       Formulation[]                 @relation("FormulationMixerType")
-  formulationVeinUses       FormulationVeinMethod[]
-  productionPatternUses     ProductionDesignPattern[]
-  bodiesAsMixer             SampleBody[]                  @relation("SampleBodyMixerType")
-  bodyPatternUses           SampleBodyDesignPattern[]
-  bodyVeinMethodUses        SampleBodyVeinMethod[]
-  inwardBodyPatternUses     InwardBodyDesignPattern[]
-  productionBodyPatternUses ProductionBodyDesignPattern[]
-  samplesAsDesignName       LabSample[]                   @relation("SampleDesignName")
-  inwardsAsDesignName       InwardOutwardEntry[]          @relation("InwardDesignName")
-  productionsAsDesignName   ProductionSample[]            @relation("ProductionDesignName")
+  samplesAsMixer             LabSample[]                   @relation("SampleMixerType")
+  componentsAsMaterial       FormulationComponent[]        @relation("ComponentMaterial")
+  componentsAsSize           FormulationComponent[]        @relation("ComponentSize")
+  designPatternUses          SampleDesignPattern[]
+  veinMethodUses             SampleVeinMethod[]
+  inwardCompanyUses          InwardOutwardEntry[]
+  inwardPatternUses          InwardDesignPattern[]
+  formulationsAsMixer        Formulation[]                 @relation("FormulationMixerType")
+  formulationVeinUses        FormulationVeinMethod[]
+  productionPatternUses      ProductionDesignPattern[]
+  bodiesAsMixer              SampleBody[]                  @relation("SampleBodyMixerType")
+  bodyPatternUses            SampleBodyDesignPattern[]
+  bodyVeinMethodUses         SampleBodyVeinMethod[]
+  inwardBodyPatternUses      InwardBodyDesignPattern[]
+  productionBodyPatternUses  ProductionBodyDesignPattern[]
+  samplesAsDesignName        LabSample[]                   @relation("SampleDesignName")
+  inwardsAsDesignName        InwardOutwardEntry[]          @relation("InwardDesignName")
+  productionsAsDesignName    ProductionSample[]            @relation("ProductionDesignName")
+  bodyVeinDetailUses         SampleBodyVeinDetail[]        @relation("SampleBodyVeinDetail")
+  formulationVeinDetailUses  FormulationVeinDetail[]       @relation("FormulationVeinDetail")
+  inwardDesignMixerUses      InwardDesignDetail[]          @relation("InwardDesignMixerType")
+  inwardDesignVeinDetailUses InwardDesignVeinDetail[]      @relation("InwardDesignVeinDetail")
+  inwardDesignColourUses     InwardDesignColour[]          @relation("InwardDesignColour")
+  sampleDesignMixerUses      SampleDesignDetail[]          @relation("SampleDesignMixerType")
+  sampleDesignVeinDetailUses SampleDesignVeinDetail[]      @relation("SampleDesignVeinDetail")
+  sampleDesignColourUses     SampleDesignColour[]          @relation("SampleDesignColour")
+  formulationAdditiveUses    FormulationAdditive[]         @relation("FormulationAdditive")
 
   @@unique([categoryId, normalizedKey])
   @@unique([categoryId, code])
@@ -195,6 +204,8 @@ model LabSample {
   /// carry the same bodyIndex). Samples saved before bodies existed have
   /// none — their sample-level design / vein apply to every body.
   bodies         SampleBody[]
+  /// Plain Body – No: the selected design types with their own fields.
+  designDetails  SampleDesignDetail[]
 
   @@index([sampleDate])
   @@index([status])
@@ -207,9 +218,16 @@ model LabSample {
 /// serves the main body, the Roy Body opened from Design, the Roy Body opened
 /// from Vein, and any body type added later.
 enum FormulationRole {
+  /// Material Details of Body i (bodyIndex = i).
   MAIN_BODY
+  /// Earlier form: the Roy Body opened from Body i's Design (bodyIndex = i).
   DESIGN_ROY_BODY
+  /// Earlier form: the Roy Body opened from a Vein.
   VEIN_ROY_BODY
+  /// Rebuilt Lab Sample form: Material Details of Roy Body k (bodyIndex = k).
+  ROY_BODY
+  /// Rebuilt Lab Sample form: Material Details of Chessboard Body k (bodyIndex = k).
+  CHESSBOARD_BODY
 }
 
 /// Belongs to exactly one owner: a lab sample OR an inward/outward entry
@@ -230,10 +248,12 @@ model Formulation {
   notes         String?
 
   // Roy Body details (unused for plain formulations)
-  numberOfBodies Int?
-  hasVein        Boolean?
-  veinNotes      String?
-  mixerTypeId    String?
+  numberOfBodies  Int?
+  hasVein         Boolean?
+  /// Vein details typed as free text before the Vein Details list existed
+  /// (moved into the list on first use / `npm run db:seed`).
+  legacyVeinNotes String?  @map("veinNotes")
+  mixerTypeId     String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -244,7 +264,9 @@ model Formulation {
   children     Formulation[]            @relation("NestedFormulation")
   mixerType    MasterValue?             @relation("FormulationMixerType", fields: [mixerTypeId], references: [id], onDelete: Restrict)
   components   FormulationComponent[]
+  additives    FormulationAdditive[]
   veinMethods  FormulationVeinMethod[]
+  veinDetails  FormulationVeinDetail[]
   measurements FormulationMeasurement[]
 
   @@unique([sampleId, role, bodyIndex])
@@ -262,6 +284,19 @@ model FormulationVeinMethod {
 
   @@id([formulationId, methodId])
   @@index([methodId])
+}
+
+/// Vein details of a Roy Body — values of the Vein Details list.
+model FormulationVeinDetail {
+  formulationId String
+  detailId      String
+  sortOrder     Int    @default(0)
+
+  formulation Formulation @relation(fields: [formulationId], references: [id], onDelete: Cascade)
+  detail      MasterValue @relation("FormulationVeinDetail", fields: [detailId], references: [id], onDelete: Restrict)
+
+  @@id([formulationId, detailId])
+  @@index([detailId])
 }
 
 /// L / a / b of a Roy Body — same stage × body structure as the sample's.
@@ -306,6 +341,71 @@ model FormulationComponent {
   @@index([materialId])
 }
 
+/// Additives used in a formulation (Additives list) and the quantity in grams.
+model FormulationAdditive {
+  id            String   @id @default(cuid())
+  formulationId String
+  additiveId    String
+  quantity      Decimal? @db.Decimal(14, 4)
+  sortOrder     Int      @default(0)
+
+  formulation Formulation @relation(fields: [formulationId], references: [id], onDelete: Cascade)
+  additive    MasterValue @relation("FormulationAdditive", fields: [additiveId], references: [id], onDelete: Restrict)
+
+  @@unique([formulationId, additiveId])
+  @@index([additiveId])
+}
+
+/// One selected design type of a lab sample (Plain Body – No), with the
+/// fields that type has — same shape as InwardDesignDetail:
+///  - Roy Body / Chessboard: Number of Roy Body / Chessboard Body (n); their
+///    Material Details are Formulation ROY_BODY / CHESSBOARD_BODY 1 … n
+///  - Kreos / Vein: Vein Present, and when Yes: Mixer Type, Vein Details,
+///    colours used with quantity
+///  - Carrara: colours used with quantity
+model SampleDesignDetail {
+  id          String     @id @default(cuid())
+  sampleId    String
+  type        DesignType
+  bodyCount   Int?
+  veinPresent Boolean?
+  mixerTypeId String?
+
+  sample      LabSample                @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+  mixerType   MasterValue?             @relation("SampleDesignMixerType", fields: [mixerTypeId], references: [id], onDelete: Restrict)
+  veinDetails SampleDesignVeinDetail[]
+  colours     SampleDesignColour[]
+
+  @@unique([sampleId, type])
+  @@index([mixerTypeId])
+}
+
+model SampleDesignVeinDetail {
+  designDetailId String
+  detailId       String
+  sortOrder      Int    @default(0)
+
+  designDetail SampleDesignDetail @relation(fields: [designDetailId], references: [id], onDelete: Cascade)
+  detail       MasterValue        @relation("SampleDesignVeinDetail", fields: [detailId], references: [id], onDelete: Restrict)
+
+  @@id([designDetailId, detailId])
+  @@index([detailId])
+}
+
+model SampleDesignColour {
+  id             String   @id @default(cuid())
+  designDetailId String
+  colourId       String
+  quantity       Decimal? @db.Decimal(14, 4)
+  sortOrder      Int      @default(0)
+
+  designDetail SampleDesignDetail @relation(fields: [designDetailId], references: [id], onDelete: Cascade)
+  colour       MasterValue        @relation("SampleDesignColour", fields: [colourId], references: [id], onDelete: Restrict)
+
+  @@unique([designDetailId, colourId])
+  @@index([colourId])
+}
+
 model SampleDesignPattern {
   sampleId  String
   patternId String
@@ -334,18 +434,21 @@ model SampleVeinMethod {
 /// Material Choices (Formulation MAIN_BODY), Roy Bodies and L/a/b readings
 /// share its bodyIndex.
 model SampleBody {
-  id             String          @id @default(cuid())
-  sampleId       String
-  bodyIndex      Int
-  designCategory DesignCategory?
-  mixerTypeId    String?
-  hasVein        Boolean?
-  veinNotes      String?
+  id              String          @id @default(cuid())
+  sampleId        String
+  bodyIndex       Int
+  designCategory  DesignCategory?
+  mixerTypeId     String?
+  hasVein         Boolean?
+  /// Vein details typed as free text before the Vein Details list existed
+  /// (moved into the list on first use / `npm run db:seed`).
+  legacyVeinNotes String?         @map("veinNotes")
 
   sample         LabSample                 @relation(fields: [sampleId], references: [id], onDelete: Cascade)
   mixerType      MasterValue?              @relation("SampleBodyMixerType", fields: [mixerTypeId], references: [id], onDelete: Restrict)
   designPatterns SampleBodyDesignPattern[]
   veinMethods    SampleBodyVeinMethod[]
+  veinDetails    SampleBodyVeinDetail[]
 
   @@unique([sampleId, bodyIndex])
   @@index([mixerTypeId])
@@ -375,14 +478,31 @@ model SampleBodyVeinMethod {
   @@index([methodId])
 }
 
+/// Vein details of one body — values of the Vein Details list (like Color Used).
+model SampleBodyVeinDetail {
+  bodyId    String
+  detailId  String
+  sortOrder Int    @default(0)
+
+  body   SampleBody  @relation(fields: [bodyId], references: [id], onDelete: Cascade)
+  detail MasterValue @relation("SampleBodyVeinDetail", fields: [detailId], references: [id], onDelete: Restrict)
+
+  @@id([bodyId, detailId])
+  @@index([detailId])
+}
+
 enum MeasurementStage {
   POST_PRESS
   POST_POLISH
 }
 
+/// L, a, b of a lab sample: Post Press and Post Polish per body — the
+/// regular bodies (MAIN, 1 … N) and, when those design types are selected,
+/// the Roy Bodies and Chessboard Bodies (1 … n each).
 model LabMeasurement {
   id        String           @id @default(cuid())
   sampleId  String
+  part      ReadingPart      @default(MAIN)
   stage     MeasurementStage
   bodyIndex Int
   l         Decimal?         @db.Decimal(8, 3)
@@ -391,7 +511,7 @@ model LabMeasurement {
 
   sample LabSample @relation(fields: [sampleId], references: [id], onDelete: Cascade)
 
-  @@unique([sampleId, stage, bodyIndex])
+  @@unique([sampleId, part, stage, bodyIndex])
 }
 
 enum AttachmentPurpose {
@@ -403,9 +523,10 @@ enum AttachmentPurpose {
 model SampleAttachment {
   id                 String            @id @default(cuid())
   /// Null until the sample is saved; unlinked uploads are cleaned up by a job.
-  /// A file belongs to a lab sample OR a production sample (never both).
+  /// A file belongs to one lab sample, production sample or Inward / Outward entry.
   sampleId           String?
   productionSampleId String?
+  inwardEntryId      String?
   purpose            AttachmentPurpose @default(SAMPLE_OUTPUT)
   originalName       String
   storageKey         String            @unique
@@ -415,12 +536,14 @@ model SampleAttachment {
   uploadedById       String?
   createdAt          DateTime          @default(now())
 
-  sample           LabSample?        @relation(fields: [sampleId], references: [id], onDelete: Cascade)
-  productionSample ProductionSample? @relation(fields: [productionSampleId], references: [id], onDelete: Cascade)
-  uploadedBy       User?             @relation("AttachmentUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  sample           LabSample?          @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+  productionSample ProductionSample?   @relation(fields: [productionSampleId], references: [id], onDelete: Cascade)
+  inwardEntry      InwardOutwardEntry? @relation(fields: [inwardEntryId], references: [id], onDelete: Cascade)
+  uploadedBy       User?               @relation("AttachmentUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
 
   @@index([sampleId])
   @@index([productionSampleId])
+  @@index([inwardEntryId])
   @@index([sha256])
   @@index([createdAt])
 }
@@ -444,9 +567,14 @@ model InwardOutwardEntry {
   /// Sample Design Name typed as free text before it became a master list
   /// (moved into the list by `npm run db:seed` or the next save).
   legacySampleDesignName String?         @map("sampleDesignName")
+  /// Slab Number — Inward / Outward's own series, suggested as the next free number.
+  slabNumber             Int?            @unique
   numberOfBodies         Int?
+  /// Plain Body – Yes (PLAIN_BODY) / Plain Body – No (NON_PLAIN_BODY), for the whole sample.
   designCategory         DesignCategory?
+  /// Recorded by the earlier form only (kept; shown on the Review page and in Downloads).
   recreationAttempts     String?
+  remarks                String?
 
   createdById String?
   updatedById String?
@@ -462,10 +590,15 @@ model InwardOutwardEntry {
   designPatterns InwardDesignPattern[]
   measurements   InwardMeasurement[]
   formulations   Formulation[]
-  /// Body 1 … n: each body's design (its Roy Body formulation and L/a/b carry
-  /// the same bodyIndex). Older entries have none — their entry-level design
-  /// applies to every body.
+  /// Recorded by the earlier form: each body's design (its Roy Body
+  /// formulation and L/a/b carry the same bodyIndex). The rebuilt form records
+  /// the design for the whole sample (designCategory, designPatterns,
+  /// designDetails) instead.
   bodies         InwardBody[]
+  /// Plain Body – No: each selected design type and its own fields.
+  designDetails  InwardDesignDetail[]
+  /// Sample Output files.
+  attachments    SampleAttachment[]
 
   @@index([companyId])
   @@index([designNameId])
@@ -511,17 +644,92 @@ model InwardBodyDesignPattern {
 }
 
 /// One L/a/b reading per body (no Post Press / Post Polish split here).
+/// L, a, b of an Inward / Outward entry: one reading per body — the regular
+/// bodies (MAIN, 1 … N) and, when those design types are selected, the Roy
+/// Bodies and Chessboard Bodies (1 … n each).
 model InwardMeasurement {
-  id        String   @id @default(cuid())
+  id        String      @id @default(cuid())
   entryId   String
+  part      ReadingPart @default(MAIN)
   bodyIndex Int
-  l         Decimal? @db.Decimal(8, 3)
-  a         Decimal? @db.Decimal(8, 3)
-  b         Decimal? @db.Decimal(8, 3)
+  l         Decimal?    @db.Decimal(8, 3)
+  a         Decimal?    @db.Decimal(8, 3)
+  b         Decimal?    @db.Decimal(8, 3)
 
   entry InwardOutwardEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
 
-  @@unique([entryId, bodyIndex])
+  @@unique([entryId, part, bodyIndex])
+}
+
+/// Which bodies a reading belongs to: the regular bodies, or the Roy /
+/// Chessboard Bodies of those design types (Lab Sample, Inward / Outward).
+enum ReadingPart {
+  MAIN
+  ROY_BODY
+  CHESSBOARD
+}
+
+/// Plain Body – No: the design types a lab sample or an Inward / Outward
+/// entry can carry. Each is also linked to its value in the Design Patterns
+/// list (SampleDesignPattern / InwardDesignPattern), so lists, the Dashboard
+/// and Downloads see it as a design pattern.
+enum DesignType {
+  ROY_BODY
+  KREOS
+  CARRARA
+  VEIN
+  CHESSBOARD
+}
+
+/// One selected design type of an entry, with the fields that type has:
+///  - Roy Body / Chessboard: Number of Roy Body / Chessboard Body (n)
+///  - Kreos / Vein: Vein Present, and when Yes: Mixer Type, Vein Details,
+///    colours used with quantity
+///  - Carrara: colours used with quantity
+model InwardDesignDetail {
+  id          String     @id @default(cuid())
+  entryId     String
+  type        DesignType
+  bodyCount   Int?
+  veinPresent Boolean?
+  mixerTypeId String?
+
+  entry       InwardOutwardEntry       @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  mixerType   MasterValue?             @relation("InwardDesignMixerType", fields: [mixerTypeId], references: [id], onDelete: Restrict)
+  veinDetails InwardDesignVeinDetail[]
+  colours     InwardDesignColour[]
+
+  @@unique([entryId, type])
+  @@index([mixerTypeId])
+}
+
+/// Vein Details of a Kreos / Vein design type — values of the Vein Details list.
+model InwardDesignVeinDetail {
+  designDetailId String
+  detailId       String
+  sortOrder      Int    @default(0)
+
+  designDetail InwardDesignDetail @relation(fields: [designDetailId], references: [id], onDelete: Cascade)
+  detail       MasterValue        @relation("InwardDesignVeinDetail", fields: [detailId], references: [id], onDelete: Restrict)
+
+  @@id([designDetailId, detailId])
+  @@index([detailId])
+}
+
+/// A colour used by a Kreos / Carrara / Vein design type (Pigments / Colours
+/// list) and its quantity in grams.
+model InwardDesignColour {
+  id             String   @id @default(cuid())
+  designDetailId String
+  colourId       String
+  quantity       Decimal? @db.Decimal(14, 4)
+  sortOrder      Int      @default(0)
+
+  designDetail InwardDesignDetail @relation(fields: [designDetailId], references: [id], onDelete: Cascade)
+  colour       MasterValue        @relation("InwardDesignColour", fields: [colourId], references: [id], onDelete: Restrict)
+
+  @@unique([designDetailId, colourId])
+  @@index([colourId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

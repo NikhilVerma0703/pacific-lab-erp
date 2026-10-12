@@ -4,11 +4,16 @@ import { ArrowLeft, Pencil } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { can } from "@/lib/permissions";
 import { requireUser } from "@/lib/session";
+import { formatDate } from "@/lib/utils";
 import { InwardDetailView } from "@/modules/inward-outward/components/InwardDetailView";
 import { getInwardDetail } from "@/modules/inward-outward/queries";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Inward / Outward Entry" };
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  const e = await getInwardDetail((await params).id);
+  return { title: e ? `Inward / Outward S.No. ${e.serialNo}` : "Inward / Outward Entry" };
+}
 
 export default async function InwardDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
@@ -18,11 +23,11 @@ export default async function InwardDetailPage({ params }: { params: Promise<{ i
   return (
     <>
       <PageHeader
-        title={`Inward / Outward — Serial No. ${e.serialNo}`}
-        description={[e.company?.label, e.sampleDesignName].filter(Boolean).join(" · ") || undefined}
+        title={`Inward / Outward S.No. ${e.serialNo}`}
+        description={[e.slabNumber ? `Slab ${e.slabNumber}` : null, formatDate(e.entryDate), e.company?.label, e.sampleDesignName].filter(Boolean).join(" · ")}
         actions={
           <>
-            <Link href="/inward-outward#recent" className="btn-secondary">
+            <Link href="/inward-outward#register" className="btn-secondary">
               <ArrowLeft className="size-4" /> Back
             </Link>
             {can(user, "inward.edit") && (

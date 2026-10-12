@@ -1,14 +1,18 @@
 import "server-only";
 import { Prisma } from "@prisma/client";
-import { prisma, type Tx } from "@/lib/db";
+import { prisma } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { can } from "@/lib/permissions";
+import { plantToday } from "@/lib/plant-time";
 import type { CurrentUser } from "@/lib/session";
-import { MASTER, VALUE_CODE, type MasterCode } from "@/modules/master-data/catalog";
+import { readingIsEmpty, type LabReadingData } from "@/modules/forms/fields";
+import { formulationInclude } from "@/modules/formulation/service";
+import { MASTER, type MasterCode } from "@/modules/master-data/catalog";
 import { MasterValueError, resolveMasterRef } from "@/modules/master-data/service";
 import type { MasterRef } from "@/modules/master-data/types";
-import { formulationInclude, writeRoyBody } from "@/modules/formulation/service";
-import { codesOf, todayInPlant } from "@/modules/samples/service";
+import { otherPatternIds, patternFor } from "@/modules/forms/design-server";
+import type { DesignTypeKey } from "@/modules/forms/design-types";
+import { lockInwardNumbering, nextInwardSerial, nextInwardSlab } from "./numbering";
 import type { InwardFormData } from "./schema";
 
 export class InwardSaveError extends Error {
@@ -20,36 +24,49 @@ export class InwardSaveError extends Error {
   }
 }
 
-const LOCK_KEY = 4_471_002; // "inward/outward numbering"
-
-type Db = Tx | typeof prisma;
-
-export async function nextInwardSerial(db: Db): Promise<number> {
-  const agg = await db.inwardOutwardEntry.aggregate({ _max: { serialNo: true } });
-  return (agg._max.serialNo ?? 0) + 1;
-}
+const dateOnly = (s: string) => new Date(`${s}T00:00:00.000Z`);
 
 /**
- * Create or update an Inward / Outward entry in one transaction.
- * Linking it to a lab sample marks that sample's physical sample as
- * present, which moves it out of Rectification.
+ * Create or update an Inward / Outward entry in one transaction: Sample
+ * Details, the design (Plain Body – Yes / No, the design types with their
+ * fields), the L, a, b of Body 1 … N, Roy Body 1 … n and Chessboard Body
+ * 1 … n, Sample Output files and Remarks. On update the design and readings
+ * are replaced; the previous version is kept in the audit log.
+ *
+ * Entries saved with the earlier form keep what this form does not show
+ * (linked lab sample, Lab Recreation Attempts, Roy Body formulations, design
+ * patterns that are not design types); their per-body design is replaced by
+ * the design chosen here.
  */
 export async function saveInward(args: {
   id?: string;
   data: InwardFormData;
   user: CurrentUser;
+  /** Create only: allocate S.No. / Slab even if the form carried a value (an untouched suggestion). */
   autoSerial?: boolean;
-}): Promise<{ id: string; serialNo: number }> {
-  const { id, data, user, autoSerial } = args;
+  autoSlab?: boolean;
+}): Promise<{ id: string; serialNo: number; slabNumber: number | null; removedKeys: string[] }> {
+  const { id, data, user, autoSerial, autoSlab } = args;
   const canOverride = can(user, "inward.overrideNumbers");
   const canAddMaster = can(user, "master.addFromForm");
+  const canRemoveFiles = can(user, "attachment.remove");
 
   return prisma
     .$transaction(
       async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${LOCK_KEY})`;
+        await lockInwardNumbering(tx);
 
-        const existing = id ? await tx.inwardOutwardEntry.findUnique({ where: { id } }) : null;
+        const patternSelect = { pattern: { select: { id: true, code: true, label: true } } } as const;
+        const existing = id
+          ? await tx.inwardOutwardEntry.findUnique({
+              where: { id },
+              include: {
+                attachments: { select: { id: true, storageKey: true } },
+                designPatterns: { select: patternSelect, orderBy: { sortOrder: "asc" } },
+                bodies: { select: { designPatterns: { select: patternSelect, orderBy: { sortOrder: "asc" } } }, orderBy: { bodyIndex: "asc" } },
+              },
+            })
+          : null;
         if (id && !existing) throw new InwardSaveError("This entry no longer exists — it may have been deleted.");
 
         const resolve = async (code: MasterCode, ref: MasterRef | null | undefined) => {
@@ -59,99 +76,156 @@ export async function saveInward(args: {
           return resolveMasterRef(tx, code, ref, user.id);
         };
 
-        // ── serial number ────────────────────────────────────────────────────
+        // ── numbers ──────────────────────────────────────────────────────────
         let serialNo: number;
-        if (existing) serialNo = canOverride && data.serialNo !== null ? data.serialNo : existing.serialNo;
-        else serialNo = canOverride && !autoSerial && data.serialNo !== null ? data.serialNo : await nextInwardSerial(tx);
-        const clash = await tx.inwardOutwardEntry.findFirst({
-          where: { serialNo, ...(existing ? { NOT: { id: existing.id } } : {}) },
-          select: { id: true },
-        });
-        if (clash) throw new InwardSaveError("Duplicate serial number.", { serialNo: `Serial No. ${serialNo} is already used.` });
-
-        // ── link to the lab sample ───────────────────────────────────────────
-        const labSampleId = existing ? (data.labSampleId ?? existing.labSampleId) : data.labSampleId;
-        if (labSampleId && labSampleId !== existing?.labSampleId) {
-          const sample = await tx.labSample.findUnique({
-            where: { id: labSampleId },
-            select: { serialNo: true, inwardEntry: { select: { serialNo: true } } },
-          });
-          if (!sample) throw new InwardSaveError("The linked lab sample no longer exists.");
-          if (sample.inwardEntry) {
-            throw new InwardSaveError(
-              `Lab sample S.No. ${sample.serialNo} is already recorded as Inward/Outward Serial No. ${sample.inwardEntry.serialNo}.`,
-            );
-          }
+        let slabNumber: number | null;
+        if (existing) {
+          serialNo = canOverride && data.serialNo !== null ? data.serialNo : existing.serialNo;
+          // Entries from the earlier form had no Slab Number: they get the next free one.
+          slabNumber = canOverride ? data.slabNumber : (existing.slabNumber ?? (await nextInwardSlab(tx)));
+        } else {
+          serialNo = canOverride && !autoSerial && data.serialNo !== null ? data.serialNo : await nextInwardSerial(tx);
+          slabNumber = canOverride && !autoSlab ? data.slabNumber : await nextInwardSlab(tx);
         }
+        const fieldErrors: Record<string, string> = {};
+        const notMe = existing ? { NOT: { id: existing.id } } : {};
+        if (await tx.inwardOutwardEntry.findFirst({ where: { serialNo, ...notMe }, select: { id: true } })) {
+          fieldErrors.serialNo = `S.No. ${serialNo} is already used by another entry.`;
+        }
+        if (slabNumber !== null) {
+          const clash = await tx.inwardOutwardEntry.findFirst({ where: { slabNumber, ...notMe }, select: { serialNo: true } });
+          if (clash) fieldErrors.slabNumber = `Slab ${slabNumber} is already used by S.No. ${clash.serialNo}.`;
+        }
+        if (Object.keys(fieldErrors).length) throw new InwardSaveError("Duplicate number — see the highlighted fields.", fieldErrors);
 
+        // ── the entry ────────────────────────────────────────────────────────
+        const entryDate = dateOnly(data.entryDate ?? (existing ? existing.entryDate.toISOString().slice(0, 10) : plantToday()));
+        const n = data.numberOfBodies ?? 0;
         const base = {
           serialNo,
-          entryDate: new Date(`${data.entryDate ?? (existing ? existing.entryDate.toISOString().slice(0, 10) : todayInPlant())}T00:00:00Z`),
-          labSampleId: labSampleId ?? null,
+          slabNumber,
+          entryDate,
           companyId: await resolve(MASTER.COMPANY, data.company),
-          designNameId: await resolve(MASTER.DESIGN_NAME, data.sampleDesignName),
-          // Moved into the Design Names list by this save.
+          designNameId: await resolve(MASTER.DESIGN_NAME, data.designName),
+          // A name typed before the Design Names list existed is now the list value.
           legacySampleDesignName: null,
+          designCategory: data.plainBody === null ? null : data.plainBody ? ("PLAIN_BODY" as const) : ("NON_PLAIN_BODY" as const),
           numberOfBodies: data.numberOfBodies,
-          // Design now lives on each body (InwardBody); the entry-level column
-          // only remains for entries saved before bodies existed.
-          designCategory: null,
-          recreationAttempts: data.recreationAttempts,
+          remarks: data.remarks,
           updatedById: user.id,
         };
-
         const entry = existing
           ? await tx.inwardOutwardEntry.update({ where: { id: existing.id }, data: base })
           : await tx.inwardOutwardEntry.create({ data: { ...base, createdById: user.id } });
 
         if (existing) {
-          await tx.formulation.deleteMany({ where: { inwardEntryId: entry.id } });
+          await tx.inwardDesignDetail.deleteMany({ where: { entryId: entry.id } });
           await tx.inwardDesignPattern.deleteMany({ where: { entryId: entry.id } });
           await tx.inwardMeasurement.deleteMany({ where: { entryId: entry.id } });
-          await tx.inwardBody.deleteMany({ where: { entryId: entry.id } });
+          // The earlier form's per-body design is replaced by the design chosen here.
+          if (data.plainBody !== null) await tx.inwardBody.deleteMany({ where: { entryId: entry.id } });
+          // Roy Body formulations of the earlier form: kept for Body 1 … N.
+          await tx.formulation.deleteMany({ where: { inwardEntryId: entry.id, bodyIndex: { gt: Math.max(n, 1) } } });
         }
 
-        // Body 1 … n — each body's Design (+ Roy Body) and L/a/b.
-        const n = data.numberOfBodies ?? 0;
-        const labRows: Prisma.InwardMeasurementCreateManyInput[] = [];
-        for (const [k, body] of data.bodies.slice(0, n).entries()) {
-          const bodyIndex = k + 1;
-          const row = await tx.inwardBody.create({ data: { entryId: entry.id, bodyIndex, designCategory: body.designCategory } });
-          if (body.designCategory === "NON_PLAIN_BODY") {
-            const patternIds: string[] = [];
-            for (const ref of body.designPatterns) {
-              const pid = await resolve(MASTER.DESIGN_PATTERN, ref);
-              if (pid && !patternIds.includes(pid)) patternIds.push(pid);
+        // ── design types (Plain Body – No) ───────────────────────────────────
+        type TypeRow = {
+          type: DesignTypeKey;
+          bodyCount?: number | null;
+          vein?: InwardFormData["kreos"];
+          colours?: InwardFormData["carrara"]["colours"];
+        };
+        const typeRows: TypeRow[] = [];
+        for (const type of data.plainBody === false ? data.designTypes : []) {
+          if (type === "ROY_BODY") typeRows.push({ type, bodyCount: data.royBody.count });
+          if (type === "CHESSBOARD") typeRows.push({ type, bodyCount: data.chessboard.count });
+          if (type === "KREOS") typeRows.push({ type, vein: data.kreos, colours: data.kreos.colours });
+          if (type === "VEIN") typeRows.push({ type, vein: data.vein, colours: data.vein.colours });
+          if (type === "CARRARA") typeRows.push({ type, colours: data.carrara.colours });
+        }
+        // Patterns of the earlier form that are not design types stay (Plain Body – No).
+        const keep =
+          existing && data.plainBody === false
+            ? otherPatternIds([...existing.designPatterns, ...existing.bodies.flatMap((b) => b.designPatterns)].map((p) => p.pattern))
+            : [];
+        const patternIds: string[] = [];
+        for (const t of typeRows) patternIds.push(await patternFor(tx, t.type, user.id));
+        for (const pid of keep) if (!patternIds.includes(pid)) patternIds.push(pid);
+        if (patternIds.length) {
+          await tx.inwardDesignPattern.createMany({ data: patternIds.map((patternId, k) => ({ entryId: entry.id, patternId, sortOrder: k })) });
+        }
+        for (const t of typeRows) {
+          const veinOn = t.vein?.veinPresent === true;
+          const row = await tx.inwardDesignDetail.create({
+            data: {
+              entryId: entry.id,
+              type: t.type,
+              bodyCount: t.bodyCount ?? null,
+              veinPresent: t.vein ? t.vein.veinPresent : null,
+              mixerTypeId: veinOn ? await resolve(MASTER.MIXER_TYPE, t.vein!.mixerType) : null,
+            },
+          });
+          if (veinOn) {
+            const ids: string[] = [];
+            for (const ref of t.vein!.veinDetails) {
+              const did = await resolve(MASTER.VEIN_DETAIL, ref);
+              if (did && !ids.includes(did)) ids.push(did);
             }
-            if (patternIds.length) {
-              await tx.inwardBodyDesignPattern.createMany({
-                data: patternIds.map((patternId, i) => ({ bodyId: row.id, patternId, sortOrder: i })),
-              });
-            }
-            if ((await codesOf(tx, patternIds)).has(VALUE_CODE.ROY_BODY)) {
-              await writeRoyBody(tx, { inwardEntryId: entry.id }, "DESIGN_ROY_BODY", body.designRoyBody, resolve, bodyIndex);
+            if (ids.length) {
+              await tx.inwardDesignVeinDetail.createMany({ data: ids.map((detailId, k) => ({ designDetailId: row.id, detailId, sortOrder: k })) });
             }
           }
-          const r = body.lab;
-          if (r.l !== null || r.a !== null || r.b !== null) labRows.push({ entryId: entry.id, bodyIndex, l: r.l, a: r.a, b: r.b });
+          // Carrara always; Kreos / Vein only with Vein Present – Yes.
+          if (t.type === "CARRARA" || veinOn) {
+            const seen = new Set<string>();
+            let k = 0;
+            for (const c of t.colours ?? []) {
+              const cid = await resolve(MASTER.PIGMENT, c.colour);
+              if (!cid || seen.has(cid)) continue;
+              seen.add(cid);
+              await tx.inwardDesignColour.create({
+                data: { designDetailId: row.id, colourId: cid, quantity: c.quantity === null ? null : new Prisma.Decimal(c.quantity), sortOrder: k++ },
+              });
+            }
+          }
         }
-        if (labRows.length) await tx.inwardMeasurement.createMany({ data: labRows });
 
-        // The physical sample is in hand → no longer a Rectification item.
-        if (entry.labSampleId) {
-          await tx.labSample.update({ where: { id: entry.labSampleId }, data: { physicalSamplePresent: true } });
+        // ── L, a, b ──────────────────────────────────────────────────────────
+        const rows: Prisma.InwardMeasurementCreateManyInput[] = [];
+        const add = (part: "MAIN" | "ROY_BODY" | "CHESSBOARD", list: LabReadingData[], count: number) =>
+          list.slice(0, count).forEach((r, k) => {
+            if (!readingIsEmpty(r)) rows.push({ entryId: entry.id, part, bodyIndex: k + 1, l: r.l, a: r.a, b: r.b });
+          });
+        add("MAIN", data.bodies, n);
+        if (typeRows.some((t) => t.type === "ROY_BODY")) add("ROY_BODY", data.royBodies, data.royBody.count ?? 0);
+        if (typeRows.some((t) => t.type === "CHESSBOARD")) add("CHESSBOARD", data.chessboardBodies, data.chessboard.count ?? 0);
+        if (rows.length) await tx.inwardMeasurement.createMany({ data: rows });
+
+        // ── Sample Output (files) ────────────────────────────────────────────
+        const wanted = new Set(data.attachmentIds);
+        const current = existing?.attachments ?? [];
+        const toRemove = current.filter((a) => !wanted.has(a.id));
+        if (toRemove.length && !canRemoveFiles) throw new InwardSaveError("You do not have permission to remove attached files.");
+        const newIds = [...wanted].filter((aid) => !current.some((a) => a.id === aid));
+        if (newIds.length) {
+          const ok = await tx.sampleAttachment.updateMany({
+            where: { id: { in: newIds }, sampleId: null, productionSampleId: null, inwardEntryId: null, uploadedById: user.id },
+            data: { inwardEntryId: entry.id },
+          });
+          if (ok.count !== newIds.length) throw new InwardSaveError("One of the uploaded files has expired. Please upload it again.");
         }
+        if (toRemove.length) await tx.sampleAttachment.deleteMany({ where: { id: { in: toRemove.map((a) => a.id) } } });
 
         await audit(tx, {
           entityType: "InwardOutwardEntry",
           entityId: entry.id,
           action: existing ? "UPDATE" : "CREATE",
-          summary: `Serial No. ${serialNo}`,
+          summary: `Inward / Outward S.No. ${serialNo}${slabNumber ? ` / Slab ${slabNumber}` : ""}`,
           snapshot: JSON.parse(JSON.stringify(data)) as Prisma.InputJsonValue,
           userId: user.id,
         });
 
-        return { id: entry.id, serialNo };
+        return { id: entry.id, serialNo, slabNumber, removedKeys: toRemove.map((a) => a.storageKey) };
       },
       { timeout: 20_000, maxWait: 10_000 },
     )
@@ -159,38 +233,15 @@ export async function saveInward(args: {
       if (e instanceof MasterValueError) throw new InwardSaveError(e.message);
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
         const target = String((e.meta as { target?: unknown })?.target ?? "");
-        if (target.includes("labSample")) throw new InwardSaveError("That lab sample was just recorded by someone else.");
-        throw new InwardSaveError("That serial number was just taken. Please save again.", { serialNo: "Already used." });
+        if (target.includes("slab")) throw new InwardSaveError("That slab number was just taken. Please save again.", { slabNumber: "Already used." });
+        throw new InwardSaveError("That S.No. was just taken. Please save again.", { serialNo: "Already used." });
       }
       throw e;
     });
 }
 
-export const inwardInclude = {
-  company: { select: { id: true, label: true, code: true, isActive: true } },
-  designNameValue: { select: { id: true, label: true, code: true, isActive: true } },
-  labSample: { select: { id: true, serialNo: true, slabNumber: true, sampleDate: true } },
-  createdBy: { select: { name: true } },
-  updatedBy: { select: { name: true } },
-  designPatterns: {
-    include: { pattern: { select: { id: true, label: true, code: true, isActive: true } } },
-    orderBy: { sortOrder: "asc" },
-  },
-  measurements: { orderBy: { bodyIndex: "asc" } },
-  formulations: { include: formulationInclude },
-  bodies: {
-    include: {
-      designPatterns: {
-        include: { pattern: { select: { id: true, label: true, code: true, isActive: true } } },
-        orderBy: { sortOrder: "asc" },
-      },
-    },
-    orderBy: { bodyIndex: "asc" },
-  },
-} satisfies Prisma.InwardOutwardEntryInclude;
-
-/** Permanent delete, with the full record kept in the audit log. */
-export async function deleteInward(id: string, user: CurrentUser): Promise<{ serialNo: number }> {
+/** Permanently delete an entry, after writing its full record to the audit log. */
+export async function deleteInward(id: string, user: CurrentUser): Promise<{ serialNo: number; removedKeys: string[] }> {
   return prisma.$transaction(async (tx) => {
     const snapshot = await tx.inwardOutwardEntry.findUnique({ where: { id }, include: inwardInclude });
     if (!snapshot) throw new InwardSaveError("This entry was already deleted.");
@@ -198,11 +249,37 @@ export async function deleteInward(id: string, user: CurrentUser): Promise<{ ser
       entityType: "InwardOutwardEntry",
       entityId: id,
       action: "DELETE",
-      summary: `Deleted Serial No. ${snapshot.serialNo}`,
+      summary: `Deleted Inward / Outward S.No. ${snapshot.serialNo}${snapshot.slabNumber ? ` / Slab ${snapshot.slabNumber}` : ""}`,
       snapshot: JSON.parse(JSON.stringify(snapshot)) as Prisma.InputJsonValue,
       userId: user.id,
     });
-    await tx.inwardOutwardEntry.delete({ where: { id } });
-    return { serialNo: snapshot.serialNo };
+    await tx.inwardOutwardEntry.delete({ where: { id } }); // design, readings and files cascade
+    return { serialNo: snapshot.serialNo, removedKeys: snapshot.attachments.map((a) => a.storageKey) };
   });
 }
+
+const valueSelect = { select: { id: true, label: true, code: true, isActive: true } } as const;
+
+/** Everything an entry holds — for the Review page, the form, the register and Downloads. */
+export const inwardInclude = {
+  company: valueSelect,
+  designNameValue: valueSelect,
+  labSample: { select: { id: true, serialNo: true, slabNumber: true, sampleDate: true } },
+  createdBy: { select: { name: true } },
+  updatedBy: { select: { name: true } },
+  designPatterns: { include: { pattern: valueSelect }, orderBy: { sortOrder: "asc" } },
+  designDetails: {
+    include: {
+      mixerType: valueSelect,
+      veinDetails: { include: { detail: valueSelect }, orderBy: { sortOrder: "asc" } },
+      colours: { include: { colour: valueSelect }, orderBy: { sortOrder: "asc" } },
+    },
+  },
+  measurements: { orderBy: [{ part: "asc" }, { bodyIndex: "asc" }] },
+  formulations: { include: formulationInclude },
+  bodies: {
+    include: { designPatterns: { include: { pattern: valueSelect }, orderBy: { sortOrder: "asc" } } },
+    orderBy: { bodyIndex: "asc" },
+  },
+  attachments: { orderBy: { createdAt: "asc" } },
+} satisfies Prisma.InwardOutwardEntryInclude;

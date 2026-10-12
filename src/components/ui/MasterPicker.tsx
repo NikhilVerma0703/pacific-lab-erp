@@ -3,7 +3,7 @@
 import { Check, ChevronDown, Plus, Search, Undo2, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { MasterOption, MasterRef } from "@/modules/master-data/types";
-import { cleanLabel, normalizeKey } from "@/lib/normalize";
+import { cleanLabel, MAX_LABEL_LENGTH, normalizeKey } from "@/lib/normalize";
 import { cn } from "@/lib/utils";
 
 /**
@@ -23,6 +23,8 @@ type CommonProps = {
   disabled?: boolean;
   /** Name of the list, used in prompts ("Add new Resin"). */
   noun?: string;
+  /** Longest new value that can be typed (the list's limit). */
+  maxLength?: number;
 };
 
 type SingleProps = CommonProps & {
@@ -41,7 +43,7 @@ const OTHER = "__other__";
 const ADD = "__add__";
 
 export function MasterPicker(props: SingleProps | MultiProps) {
-  const { options, placeholder = "Select…", allowCustom = true, invalid, disabled, noun = "value" } = props;
+  const { options, placeholder = "Select…", allowCustom = true, invalid, disabled, noun = "value", maxLength = MAX_LABEL_LENGTH } = props;
   const autoId = useId();
   const inputId = props.id ?? autoId;
   const listId = `${inputId}-list`;
@@ -73,7 +75,13 @@ export function MasterPicker(props: SingleProps | MultiProps) {
     else setQuery("");
   }, [open]);
 
-  const isSelected = (o: MasterOption) => selected.some((s) => s.id === o.id);
+  // Same value = same name ignoring case and spaces: a typed value that is
+  // already on the list counts as that list value.
+  const keyOf = (r: { label: string }) => normalizeKey(r.label);
+  const listed = (r: MasterRef) => (r.id ? options.find((o) => o.id === r.id) : options.find((o) => normalizeKey(o.label) === keyOf(r)));
+  const isSelected = (o: MasterOption) => selected.some((s) => (s.id ? s.id === o.id : keyOf(s) === keyOf(o)));
+  /** Typed (new) values already picked — offered back in the list, never twice. */
+  const newPicked = props.multiple ? selected.filter((s) => !s.id && !listed(s)) : [];
 
   const filtered = useMemo(() => {
     const q = normalizeKey(query);
@@ -83,11 +91,14 @@ export function MasterPicker(props: SingleProps | MultiProps) {
   }, [options, query, props.value]);
 
   const exact = query.trim()
-    ? options.find((o) => normalizeKey(o.label) === normalizeKey(query))
+    ? (options.find((o) => normalizeKey(o.label) === normalizeKey(query)) ?? newPicked.find((s) => keyOf(s) === normalizeKey(query)))
     : undefined;
 
-  type Row = { key: string; label: React.ReactNode; option?: MasterOption };
+  type Row = { key: string; label: React.ReactNode; option?: MasterOption; picked?: MasterRef };
   const rows: Row[] = filtered.map((o) => ({ key: o.id, label: o.label, option: o }));
+  for (const [i, s] of newPicked.entries()) {
+    if (!query.trim() || keyOf(s).includes(normalizeKey(query))) rows.push({ key: `picked-${i}`, label: s.label, picked: s });
+  }
   if (allowCustom && query.trim() && !exact) {
     rows.push({ key: ADD, label: <>Add “{cleanLabel(query)}”</> });
   }
@@ -133,9 +144,15 @@ export function MasterPicker(props: SingleProps | MultiProps) {
       if (!props.multiple) setOpen(false);
       return;
     }
+    if (row.picked && props.multiple) {
+      // A typed value picked earlier: choosing it again un-picks it.
+      props.onChange(props.value.filter((v) => v.id || keyOf(v) !== keyOf(row.picked!)));
+      setQuery("");
+      return;
+    }
     const o = row.option!;
     if (props.multiple) {
-      if (isSelected(o)) props.onChange(props.value.filter((v) => v.id !== o.id));
+      if (isSelected(o)) props.onChange(props.value.filter((v) => (v.id ? v.id !== o.id : keyOf(v) !== keyOf(o))));
       else props.onChange([...props.value, { id: o.id, label: o.label }]);
       setQuery("");
     } else {
@@ -175,7 +192,7 @@ export function MasterPicker(props: SingleProps | MultiProps) {
             value={v.label}
             autoFocus={v.label === ""}
             disabled={disabled}
-            maxLength={80}
+            maxLength={maxLength}
             onChange={(e) => props.onChange({ ...v, label: e.target.value })}
             onBlur={(e) => {
               // Snap to an existing value if the typed text already exists.
@@ -216,11 +233,11 @@ export function MasterPicker(props: SingleProps | MultiProps) {
                 key={s.id ?? `new-${i}`}
                 className={cn(
                   "inline-flex max-w-full items-center gap-1 rounded-md py-1 pr-1 pl-2 text-[13px] font-medium",
-                  s.id ? "bg-info-bg text-info-fg" : "bg-warn-bg text-warn-fg",
+                  listed(s) ? "bg-info-bg text-info-fg" : "bg-warn-bg text-warn-fg",
                 )}
               >
-                <span className="truncate">{s.label}</span>
-                {!s.id && <span className="text-[10px] font-bold uppercase">new</span>}
+                <span className="truncate">{listed(s)?.label ?? s.label}</span>
+                {!listed(s) && <span className="text-[10px] font-bold uppercase">new</span>}
                 <button
                   type="button"
                   aria-label={`Remove ${s.label}`}
@@ -283,6 +300,7 @@ export function MasterPicker(props: SingleProps | MultiProps) {
               className="h-11 w-full bg-transparent text-[15px] outline-none"
               placeholder={allowCustom ? `Search or type a new ${noun}` : "Search…"}
               value={query}
+              maxLength={maxLength}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={onKeyDown}
               aria-controls={listId}
@@ -292,7 +310,7 @@ export function MasterPicker(props: SingleProps | MultiProps) {
           <ul id={listId} role="listbox" aria-multiselectable={props.multiple} className="max-h-64 overflow-y-auto py-1">
             {rows.length === 0 && <li className="px-3 py-3 text-sm text-ink-3">No matches.</li>}
             {rows.map((row, i) => {
-              const sel = row.option ? isSelected(row.option) : false;
+              const sel = row.option ? isSelected(row.option) : !!row.picked;
               const special = row.key === OTHER || row.key === ADD;
               return (
                 <li
@@ -330,7 +348,7 @@ export function MasterPicker(props: SingleProps | MultiProps) {
           <input
             className="input"
             autoFocus
-            maxLength={80}
+            maxLength={maxLength}
             placeholder={`Type new ${noun}`}
             value={customDraft}
             onChange={(e) => setCustomDraft(e.target.value)}
@@ -360,10 +378,10 @@ export function MasterPicker(props: SingleProps | MultiProps) {
         </div>
       )}
 
-      {props.multiple && props.value.some((v) => !v.id) && (
+      {props.multiple && props.value.some((v) => !listed(v)) && (
         <div className="mt-1.5 space-y-1">
           {props.value.map((v, i) =>
-            v.id ? null : (
+            listed(v) ? null : (
               <SaveToggle
                 key={`save-${i}`}
                 label={<>Save “{v.label}” to the list for future use</>}

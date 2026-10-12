@@ -6,11 +6,15 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/Dialog";
-import { cn, formatDate, formatNumber } from "@/lib/utils";
+import { formatDate, formatNumber } from "@/lib/utils";
 import { deleteProductionAction } from "../actions";
 import type { RegisterRow } from "../queries";
 
-/** The Production Sample Register under the form: every saved entry, newest first, 20 per page. */
+/**
+ * The Production Sample Register under the form: every saved entry, newest
+ * first, 20 per page — Date, S.No., Slab Number, Design Name, Number of
+ * Bodies, L, a, b Details (Body 1 … N), Remarks (+ files), Review, Edit / Delete.
+ */
 export function ProductionRegister({
   rows,
   total,
@@ -52,8 +56,8 @@ export function ProductionRegister({
   const dash = (v: string | number | null | undefined) => (v === null || v === undefined || v === "" ? "—" : v);
 
   const details = (r: RegisterRow) => (
-    <Link href={`/production-sample/${r.id}`} className="btn-secondary btn-sm whitespace-nowrap">
-      <FileSearch className="size-3.5" /> Complete Details
+    <Link href={`/production-sample/${r.id}`} className="btn-secondary btn-sm whitespace-nowrap" aria-label={`Review S.No. ${r.serialNo}`}>
+      <FileSearch className="size-3.5" /> Review
     </Link>
   );
 
@@ -98,14 +102,13 @@ export function ProductionRegister({
               <thead>
                 <tr>
                   <th className="th whitespace-normal">Date</th>
-                  <th className="th whitespace-normal">S. No.</th>
+                  <th className="th whitespace-normal">S.No.</th>
                   <th className="th whitespace-normal">Slab Number</th>
                   <th className="th whitespace-normal">Design Name</th>
                   <th className="th whitespace-normal">Number of Bodies</th>
-                  <th className="th whitespace-normal">Design / Design Pattern</th>
                   <th className="th whitespace-normal">L, a, b Details</th>
                   <th className="th whitespace-normal">Remarks</th>
-                  <th className="th whitespace-normal">Complete Details</th>
+                  <th className="th">Review</th>
                   <th className="th whitespace-normal">Actions</th>
                 </tr>
               </thead>
@@ -117,7 +120,6 @@ export function ProductionRegister({
                     <td className="td tabular-nums">{dash(r.slabNumber)}</td>
                     <td className="td">{dash(r.designName)}</td>
                     <td className="td tabular-nums">{dash(r.numberOfBodies)}</td>
-                    <td className="td min-w-40">{dash(r.design)}</td>
                     <td className="td">
                       <LabSummary row={r} />
                     </td>
@@ -145,7 +147,7 @@ export function ProductionRegister({
               <li key={r.id} className="space-y-3 px-4 py-4" data-row-id={r.id}>
                 <div>
                   <p className="text-[15px] font-bold">
-                    S. No. {r.serialNo}
+                    S.No. {r.serialNo}
                     {r.designName && <span className="font-semibold text-ink-2"> · {r.designName}</span>}
                   </p>
                   <p className="text-[13px] text-ink-2">
@@ -155,8 +157,6 @@ export function ProductionRegister({
                 <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-[14px]">
                   <dt className="text-ink-3">No. of Bodies</dt>
                   <dd>{dash(r.numberOfBodies)}</dd>
-                  <dt className="text-ink-3">Design</dt>
-                  <dd>{dash(r.design)}</dd>
                   <dt className="text-ink-3">L, a, b</dt>
                   <dd className="min-w-0 overflow-x-auto">
                     <LabSummary row={r} />
@@ -201,7 +201,7 @@ export function ProductionRegister({
             <p>Are you sure you want to delete this entry?</p>
             {target && (
               <p className="mt-2 text-sm">
-                Production sample S. No. {target.serialNo}
+                Production sample S.No. {target.serialNo}
                 {target.slabNumber ? ` · Slab ${target.slabNumber}` : ""} will be removed permanently, with its readings and files.
               </p>
             )}
@@ -239,21 +239,12 @@ function FilesBadge({ n }: { n: number }) {
   );
 }
 
-const STAGE_SHORT = { POST_PRESS: "Press", POST_POLISH: "Polish" } as const;
-
-type Line = { key: string; label: string; tone: "brand" | "accent"; v: { l: string | null; a: string | null; b: string | null } };
-
-/**
- * Compact L/a/b for the register, body by body: "B1 · Press", "B1 · Polish",
- * then that body's Roy Body readings ("B1 Roy · Press · R1").
- */
+/** Compact L, a, b for the register, body by body: "B1 · Post Press", "B1 · Post Polish". */
 function LabSummary({ row }: { row: RegisterRow }) {
-  const lines: Line[] = [];
+  const lines: { key: string; label: string; v: { l: string | null; a: string | null; b: string | null } }[] = [];
   for (const b of row.bodies) {
-    if (b.postPress) lines.push({ key: `${b.index}-pp`, label: `B${b.index} · Press`, tone: "brand", v: b.postPress });
-    if (b.postPolish) lines.push({ key: `${b.index}-pl`, label: `B${b.index} · Polish`, tone: "brand", v: b.postPolish });
-    for (const m of b.royBody?.readings ?? [])
-      lines.push({ key: `${b.index}-r-${m.stage}-${m.bodyIndex}`, label: `B${b.index} Roy · ${STAGE_SHORT[m.stage]} · R${m.bodyIndex}`, tone: "accent", v: m });
+    if (b.postPress) lines.push({ key: `${b.index}-pp`, label: `B${b.index} · Post Press`, v: b.postPress });
+    if (b.postPolish) lines.push({ key: `${b.index}-pl`, label: `B${b.index} · Post Polish`, v: b.postPolish });
   }
   if (!lines.length) return <span className="text-ink-3">—</span>;
   return (
@@ -269,7 +260,7 @@ function LabSummary({ row }: { row: RegisterRow }) {
       <tbody>
         {lines.map((x) => (
           <tr key={x.key}>
-            <td className={cn("pr-2 whitespace-nowrap", x.tone === "brand" ? "text-brand" : "text-accent")}>{x.label}</td>
+            <td className="pr-2 whitespace-nowrap text-brand">{x.label}</td>
             <td className="px-1.5 text-right">{formatNumber(x.v.l)}</td>
             <td className="px-1.5 text-right">{formatNumber(x.v.a)}</td>
             <td className="pl-1.5 text-right">{formatNumber(x.v.b)}</td>

@@ -1,3 +1,4 @@
+import { compareLabels } from "@/lib/normalize";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Download, FileSearch } from "lucide-react";
@@ -36,9 +37,10 @@ export default async function DownloadsPage({ searchParams }: { searchParams: Pr
 
   const patternValues = await prisma.masterValue.findMany({
     where: { category: { code: MASTER.DESIGN_PATTERN } },
-    select: { id: true, label: true, isActive: true },
+    select: { id: true, label: true, isActive: true, sortOrder: true },
     orderBy: [{ isActive: "desc" }, { sortOrder: "asc" }, { label: "asc" }],
   });
+  patternValues.sort((a, b) => Number(b.isActive) - Number(a.isActive) || a.sortOrder - b.sortOrder || compareLabels(a.label, b.label));
   const patterns = patternValues.map((v) => ({ id: v.id, label: v.isActive ? v.label : `${v.label} (disabled)` }));
 
   let results: ReturnType<typeof applyFilters> | null = null;

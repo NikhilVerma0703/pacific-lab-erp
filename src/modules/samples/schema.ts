@@ -1,263 +1,129 @@
 /**
- * Sample form schema — one definition, used by React Hook Form in the browser
+ * Lab Sample form — one definition, used by React Hook Form in the browser
  * and re-run by the server action before anything is written.
  *
- * Form inputs are strings (what <input> gives you); the schema turns them into
- * numbers/nulls. Nothing is mandatory: an empty field is simply "not
- * recorded". What *is* enforced is that whatever was typed makes sense.
+ *   1 Basic Information — Date, S.No., Slab Number, Design Name
+ *   2 Design Type and Number of Bodies — Plain Body – Yes / No; with No, the
+ *     design types (Roy Body, Kreos, Carrara, Vein, Chessboard); Number of
+ *     Bodies (N) once, shared by every type
+ *   3 Material Details — Body 1 … N, each: Resin, Grits (+ Size of Grit),
+ *     Filler, Pigments (Color Used), Additives — all Quantity (gm)
+ *   then, per selected type:
+ *     Roy Body Details   — Number of Roy Body (n) + Material Details of Roy Body 1 … n
+ *     Kreos Vein Details — Vein Present – Yes / No (+ Mixer Type, Vein Details, Kreos Vein Colors Used)
+ *     Carrara Details    — Carrara Colors Used
+ *     Vein Details       — as Kreos, with Vein Colors Used
+ *     Chessboard Details — Number of Chessboard Body (n) + Material Details of each
+ *   L, a, b Measurements — one row per body (Body 1 … N, Roy Body 1 … n,
+ *     Chessboard Body 1 … n), each Post Press L, a, b and Post Polish L, a, b
+ *   Sample Output (files), Remarks
+ *
+ * Nothing is mandatory; what is typed must make sense. Only what the form
+ * shows is validated and saved (`visibleLabInput`).
  */
 import { z } from "zod";
-import { MAX_LABEL_LENGTH } from "@/lib/normalize";
+import { countOf, designLayout, emptyVeinType, veinTypeSchema, visibleVeinType } from "@/modules/forms/design";
+import { DESIGN_TYPE_KEYS } from "@/modules/forms/design-types";
+import { bodyReadingsSchema, colourQuantitiesSchema, emptyBodyReadings, masterRefSchema, MAX_BODIES, optionalDate, optionalNumber, optionalText, yesNoSchema } from "@/modules/forms/fields";
+import { emptyMaterials, materialsSchema } from "@/modules/forms/materials";
 
-export const MAX_BODIES = 20;
+const materialsList = z.array(materialsSchema).max(MAX_BODIES);
+const readingsList = z.array(bodyReadingsSchema).max(MAX_BODIES);
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+export const labFormSchema = z.object({
+  // 1 · Basic Information
+  sampleDate: optionalDate(),
+  serialNo: optionalNumber({ min: 1, max: 99_999_999, int: true, label: "S.No." }),
+  slabNumber: optionalNumber({ min: 1, max: 999_999_999, int: true, label: "Slab Number" }),
+  /** Design Name — from the Design Names list, or a new name typed via Other…. */
+  designName: masterRefSchema.nullable(),
 
-export function optionalNumber(opts: { min?: number; max?: number; int?: boolean; label: string }) {
-  return z
-    .union([z.string(), z.number(), z.null(), z.undefined()])
-    .transform((v, ctx) => {
-      if (v === null || v === undefined) return null;
-      const s = String(v).trim().replace(/,/g, "");
-      if (s === "") return null;
-      if (!/^[-+]?(\d+\.?\d*|\.\d+)$/.test(s)) {
-        ctx.addIssue({ code: "custom", message: `${opts.label} must be a number.` });
-        return z.NEVER;
-      }
-      const n = Number(s);
-      if (opts.int && !Number.isInteger(n)) {
-        ctx.addIssue({ code: "custom", message: `${opts.label} must be a whole number.` });
-        return z.NEVER;
-      }
-      if (opts.min !== undefined && n < opts.min) {
-        ctx.addIssue({ code: "custom", message: `${opts.label} must be at least ${opts.min}.` });
-        return z.NEVER;
-      }
-      if (opts.max !== undefined && n > opts.max) {
-        ctx.addIssue({ code: "custom", message: `${opts.label} must be at most ${opts.max}.` });
-        return z.NEVER;
-      }
-      return n;
-    });
-}
+  // 2 · Design Type and Number of Bodies
+  /** Plain Body – Yes (true) / No (false). */
+  plainBody: yesNoSchema,
+  /** Plain Body – No: the selected design types. */
+  designTypes: z.array(z.enum(DESIGN_TYPE_KEYS)).max(DESIGN_TYPE_KEYS.length),
+  /** Number of Bodies (N) — once, shared by every design type. */
+  numberOfBodies: countOf("Number of Bodies (N)"),
 
-const optionalText = (max: number) =>
-  z
-    .string()
-    .max(max, `Keep it under ${max} characters.`)
-    .optional()
-    .transform((s) => (s?.trim() ? s.trim() : null));
+  // 3 · Material Details of Body 1 … N
+  materials: materialsList,
 
-export const masterRefSchema = z.object({
-  id: z.string().optional(),
-  label: z.string().max(MAX_LABEL_LENGTH, `Keep values under ${MAX_LABEL_LENGTH} characters.`),
-  save: z.boolean().optional(),
+  // the design types' own details
+  royBody: z.object({ count: countOf("Number of Roy Body (n)"), materials: materialsList }),
+  kreos: veinTypeSchema,
+  carrara: z.object({ colours: colourQuantitiesSchema }),
+  vein: veinTypeSchema,
+  chessboard: z.object({ count: countOf("Number of Chessboard Body (n)"), materials: materialsList }),
+
+  // L, a, b Measurements — Post Press and Post Polish per body
+  readings: readingsList,
+  royReadings: readingsList,
+  chessboardReadings: readingsList,
+
+  // Sample Output, Remarks
+  attachmentIds: z.array(z.string().min(1)).max(10, "At most 10 files per sample."),
+  remarks: optionalText(4000),
 });
-
-const unitSchema = z.enum(["", "GRAMS", "PERCENT"]).transform((u) => (u === "" ? null : u));
-
-// ── formulation (reused for Main Body and every Roy Body) ────────────────────
-
-export const componentRowSchema = z
-  .object({
-    material: masterRefSchema.nullable(),
-    size: masterRefSchema.nullable().optional(),
-    unit: unitSchema,
-    quantity: optionalNumber({ min: 0, max: 1_000_000, label: "Quantity (gm)" }),
-  })
-  .superRefine((row, ctx) => {
-    if (row.unit === "PERCENT" && row.quantity !== null && row.quantity > 100) {
-      ctx.addIssue({ code: "custom", path: ["quantity"], message: "A percentage cannot exceed 100." });
-    }
-  });
-
-export const formulationSchema = z.object({
-  resins: z.array(componentRowSchema).max(20),
-  grits: z.array(componentRowSchema).max(20),
-  fillers: z.array(componentRowSchema).max(20),
-  pigments: z.array(componentRowSchema).max(100),
-});
-
-// ── L / a / b ────────────────────────────────────────────────────────────────
-
-export const labRowSchema = z.object({
-  l: optionalNumber({ min: 0, max: 100, label: "L" }),
-  a: optionalNumber({ min: -128, max: 128, label: "a" }),
-  b: optionalNumber({ min: -128, max: 128, label: "b" }),
-});
-
-// ── Roy Body (opened from Design) — a complete body of its own ──────────────
-
-const yesNo = z
-  .enum(["", "YES", "NO"])
-  .optional()
-  .transform((v) => (!v ? null : v === "YES"));
-
-/**
- * The Roy Body opened from Design: its own Number of Bodies, the formulation
- * (Resin / Grits / Filler / Pigments), a Vein block like the sample's (with
- * Mixer Type and, when ROY BODY is picked there, a nested formulation) and
- * Post Press / Post Polish L/a/b per body. Extra parts are optional so older
- * saved Roy Bodies still load.
- */
-export const royBodySchema = formulationSchema
-  .extend({
-    numberOfBodies: optionalNumber({ min: 1, max: MAX_BODIES, int: true, label: "Number of Bodies" }),
-    hasVein: yesNo,
-    mixerType: masterRefSchema.nullable().optional().transform((v) => v ?? null),
-    veinMethods: z.array(masterRefSchema).max(30).optional().transform((v) => v ?? []),
-    veinNotes: optionalText(1000),
-    veinRoyBody: formulationSchema.optional().transform((v) => v ?? { resins: [], grits: [], fillers: [], pigments: [] }),
-    postPress: z.array(labRowSchema).max(MAX_BODIES).optional().transform((v) => v ?? []),
-    postPolish: z.array(labRowSchema).max(MAX_BODIES).optional().transform((v) => v ?? []),
-  })
-  .superRefine((v, ctx) => {
-    if (v.numberOfBodies !== null && (v.postPress.length > v.numberOfBodies || v.postPolish.length > v.numberOfBodies)) {
-      ctx.addIssue({ code: "custom", path: ["numberOfBodies"], message: "More L/a/b rows than bodies." });
-    }
-  });
-
-// ── design (shared by every form's body sections) ──────────────────────────
-
-export const designCategorySchema = z.enum(["", "PLAIN_BODY", "NON_PLAIN_BODY"]).transform((v) => (v === "" ? null : v));
-
-/** Flag a value picked twice in a multi-select (patterns, vein methods). */
-export function flagDuplicates(ctx: z.RefinementCtx, list: { id?: string; label: string }[], path: (string | number)[]) {
-  const seen = new Set<string>();
-  for (const r of list) {
-    const k = r.id ?? r.label.trim().toLowerCase();
-    if (seen.has(k)) {
-      ctx.addIssue({ code: "custom", path, message: `“${r.label}” is selected twice.` });
-      return;
-    }
-    seen.add(k);
-  }
-}
-
-// ── one body of a lab sample ────────────────────────────────────────────────
-
-/**
- * Body 1 … n of a lab sample — each body is recorded on its own:
- * Material Choices & Pigments → Design (with the Roy Body it may open) →
- * Vein (with Mixer Type and its Roy Body) → this body's L, a, b.
- */
-export const sampleBodySchema = z
-  .object({
-    main: formulationSchema,
-    designCategory: designCategorySchema,
-    designPatterns: z.array(masterRefSchema).max(30),
-    designRoyBody: royBodySchema,
-    mixerType: masterRefSchema.nullable(),
-    hasVein: z.enum(["", "YES", "NO"]).transform((v) => (v === "" ? null : v === "YES")),
-    veinMethods: z.array(masterRefSchema).max(30),
-    veinNotes: optionalText(1000),
-    veinRoyBody: formulationSchema,
-    postPress: labRowSchema,
-    postPolish: labRowSchema,
-  })
-  .superRefine((v, ctx) => {
-    flagDuplicates(ctx, v.designPatterns, ["designPatterns"]);
-    flagDuplicates(ctx, v.veinMethods, ["veinMethods"]);
-  });
-
-// ── the sample ───────────────────────────────────────────────────────────────
-
-export const sampleFormSchema = z
-  .object({
-    serialNo: optionalNumber({ min: 1, max: 99_999_999, int: true, label: "S.No." }),
-    slabNumber: optionalNumber({ min: 1, max: 999_999_999, int: true, label: "Slab Number" }),
-    sampleDate: z
-      .string()
-      .optional()
-      .transform((s, ctx) => {
-        if (!s) return null;
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || Number.isNaN(Date.parse(`${s}T00:00:00Z`))) {
-          ctx.addIssue({ code: "custom", message: "Enter a valid date." });
-          return z.NEVER;
-        }
-        return s;
-      }),
-    /** Design Name — from the Design Names list, or a new name typed via Other…. */
-    designName: masterRefSchema.nullable(),
-    /** Physical Sample Available? Yes → Inward / Outward; No → Rectification. */
-    physicalSamplePresent: z
-      .enum(["", "YES", "NO"])
-      .optional()
-      .transform((v) => (!v ? null : v === "YES")),
-    numberOfBodies: optionalNumber({ min: 1, max: MAX_BODIES, int: true, label: "Number of Bodies" }),
-    /** Body 1 … n — one complete section per body. */
-    bodies: z.array(sampleBodySchema).max(MAX_BODIES),
-    attachmentIds: z.array(z.string().min(1)).max(10, "At most 10 files per sample."),
-    remarks: optionalText(4000),
-  })
-  .superRefine((v, ctx) => {
-    if (v.numberOfBodies !== null && v.bodies.length > v.numberOfBodies) {
-      ctx.addIssue({ code: "custom", path: ["numberOfBodies"], message: "More body sections than bodies." });
-    }
-  });
 
 /** What the browser holds (strings). */
-export type SampleFormInput = z.input<typeof sampleFormSchema>;
+export type LabFormInput = z.input<typeof labFormSchema>;
 /** What the server writes (numbers / nulls). */
-export type SampleFormData = z.output<typeof sampleFormSchema>;
-export type FormulationInput = z.input<typeof formulationSchema>;
-export type FormulationData = z.output<typeof formulationSchema>;
-export type ComponentRowInput = z.input<typeof componentRowSchema>;
-export type RoyBodyInput = z.input<typeof royBodySchema>;
-export type RoyBodyData = z.output<typeof royBodySchema>;
-export type LabRowInput = z.input<typeof labRowSchema>;
-export type SampleBodyInput = z.input<typeof sampleBodySchema>;
-export type SampleBodyData = z.output<typeof sampleBodySchema>;
+export type LabFormData = z.output<typeof labFormSchema>;
 
-export const emptyComponentRow = (): ComponentRowInput => ({ material: null, size: null, unit: "", quantity: "" });
+/** What the form shows, from the answers so far (shared by the form and the save). */
+export const labLayout = designLayout;
 
-export const emptyFormulation = (): FormulationInput => ({
-  resins: [emptyComponentRow()],
-  grits: [emptyComponentRow()],
-  fillers: [emptyComponentRow()],
-  pigments: [],
-});
-
-export const emptyLabRow = (): LabRowInput => ({ l: "", a: "", b: "" });
-
-export const emptyRoyBody = (): RoyBodyInput => ({
-  ...emptyFormulation(),
-  numberOfBodies: "",
-  hasVein: "",
-  mixerType: null,
-  veinMethods: [],
-  veinNotes: "",
-  veinRoyBody: emptyFormulation(),
-  postPress: [],
-  postPolish: [],
-});
-
-/** A blank Body section. */
-export const emptySampleBody = (): SampleBodyInput => ({
-  main: emptyFormulation(),
-  designCategory: "",
-  designPatterns: [],
-  designRoyBody: emptyRoyBody(),
-  mixerType: null,
-  hasVein: "",
-  veinMethods: [],
-  veinNotes: "",
-  veinRoyBody: emptyFormulation(),
-  postPress: emptyLabRow(),
-  postPolish: emptyLabRow(),
-});
-
-/** A blank sample form with the suggested numbers and today's date. */
-export function newSampleInput(args: { serialNo: number; slabNumber: number; today: string }): SampleFormInput {
+/**
+ * The sample as the form shows it: Plain Body – Yes drops the design types;
+ * a type that is not selected drops its fields; Vein Present – No drops
+ * Mixer Type, Vein Details and colours; only Body 1 … N, Roy Body 1 … n and
+ * Chessboard Body 1 … n are kept (Material Details and readings). Hidden
+ * values are neither validated nor saved — they stay in the form, so
+ * switching back brings them back.
+ */
+export function visibleLabInput(input: LabFormInput): LabFormInput {
+  const { types, has, showBodies, n, royN, chessN } = labLayout(input);
   return {
+    ...input,
+    designTypes: types,
+    numberOfBodies: showBodies ? input.numberOfBodies : "",
+    materials: (input.materials ?? []).slice(0, n),
+    royBody: has("ROY_BODY") ? { count: input.royBody.count, materials: (input.royBody.materials ?? []).slice(0, royN) } : { count: "", materials: [] },
+    kreos: visibleVeinType(input.kreos, has("KREOS")),
+    carrara: has("CARRARA") ? input.carrara : { colours: [] },
+    vein: visibleVeinType(input.vein, has("VEIN")),
+    chessboard: has("CHESSBOARD")
+      ? { count: input.chessboard.count, materials: (input.chessboard.materials ?? []).slice(0, chessN) }
+      : { count: "", materials: [] },
+    readings: (input.readings ?? []).slice(0, n),
+    royReadings: (input.royReadings ?? []).slice(0, royN),
+    chessboardReadings: (input.chessboardReadings ?? []).slice(0, chessN),
+  };
+}
+
+/** A blank form with the suggested numbers and today's date. */
+export function newLabInput(args: { serialNo: number; slabNumber: number; today: string }): LabFormInput {
+  return {
+    sampleDate: args.today,
     serialNo: String(args.serialNo),
     slabNumber: String(args.slabNumber),
-    sampleDate: args.today,
     designName: null,
-    physicalSamplePresent: "",
+    plainBody: "",
+    designTypes: [],
     numberOfBodies: "",
-    bodies: [],
+    materials: [],
+    royBody: { count: "", materials: [] },
+    kreos: emptyVeinType(),
+    carrara: { colours: [] },
+    vein: emptyVeinType(),
+    chessboard: { count: "", materials: [] },
+    readings: [],
+    royReadings: [],
+    chessboardReadings: [],
     attachmentIds: [],
     remarks: "",
   };
 }
+
+export { emptyBodyReadings, emptyMaterials };

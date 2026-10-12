@@ -4,8 +4,9 @@ import { revalidatePath } from "next/cache";
 import { fail, type ActionResult } from "@/lib/action-result";
 import { PermissionError, requirePermission } from "@/lib/session";
 import { storage } from "@/lib/storage";
+import { fieldErrorsOf } from "@/modules/forms/fields";
 import { suggestProductionNumbers } from "./numbering";
-import { productionFormSchema, type ProductionFormInput } from "./schema";
+import { productionFormSchema, visibleProductionInput, type ProductionFormInput } from "./schema";
 import { deleteProductionSample, ProductionSaveError, saveProductionSample } from "./service";
 
 const PATH = "/production-sample";
@@ -22,16 +23,9 @@ export async function saveProductionAction(
   try {
     const user = await requirePermission(opts.id ? "production.edit" : "production.create");
 
-    // Backend validation is the one that counts.
-    const parsed = productionFormSchema.safeParse(input);
-    if (!parsed.success) {
-      const fieldErrors: Record<string, string> = {};
-      for (const issue of parsed.error.issues) {
-        const key = issue.path.join(".");
-        if (!fieldErrors[key]) fieldErrors[key] = issue.message;
-      }
-      return fail("Some values are not valid — see the highlighted fields.", fieldErrors);
-    }
+    // Backend validation is the one that counts — on Body 1 … N only, as the form shows.
+    const parsed = productionFormSchema.safeParse(visibleProductionInput(input));
+    if (!parsed.success) return fail("Some values are not valid — see the highlighted fields.", fieldErrorsOf(parsed.error.issues));
 
     const r = await saveProductionSample({
       id: opts.id,
@@ -45,7 +39,7 @@ export async function saveProductionAction(
     revalidatePath("/dashboard");
     if (opts.id) revalidatePath(`${PATH}/${opts.id}`);
 
-    const what = `S. No. ${r.serialNo}${r.slabNumber ? ` (Slab ${r.slabNumber})` : ""}`;
+    const what = `S.No. ${r.serialNo}${r.slabNumber ? ` (Slab ${r.slabNumber})` : ""}`;
     return {
       ok: true,
       data: { id: r.id, serialNo: r.serialNo, slabNumber: r.slabNumber },
@@ -66,7 +60,7 @@ export async function deleteProductionAction(id: string): Promise<ActionResult> 
     await removeFiles(removedKeys);
     revalidatePath(PATH);
     revalidatePath("/dashboard");
-    return { ok: true, data: undefined, message: `Production sample S. No. ${serialNo} deleted.` };
+    return { ok: true, data: undefined, message: `Production sample S.No. ${serialNo} deleted.` };
   } catch (e) {
     if (e instanceof PermissionError) return fail(e.message);
     if (e instanceof ProductionSaveError) return fail(e.message);
@@ -75,7 +69,7 @@ export async function deleteProductionAction(id: string): Promise<ActionResult> 
   }
 }
 
-/** Fresh S. No. / Slab suggestions after a save, without reloading the page. */
+/** Fresh S.No. / Slab suggestions after a save, without reloading the page. */
 export async function nextProductionNumbersAction() {
   await requirePermission("production.create");
   return suggestProductionNumbers();

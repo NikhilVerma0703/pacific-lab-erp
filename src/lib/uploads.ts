@@ -61,3 +61,6 @@ export function sniffMatches(mime: string, head: Uint8Array): boolean {
       return false;
   }
 }
+
+/** The upload limit in MB, for messages and the file picker. */
+export const maxUploadMb = () => maxUploadBytes() / (1024 * 1024);

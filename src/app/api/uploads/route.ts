@@ -11,7 +11,7 @@ import { ALLOWED_UPLOADS, extOf, maxUploadBytes, mimeFromName, sniffMatches } fr
  * as an unlinked attachment; saving the sample links it. Unlinked uploads are
  * removed by the cleanup job.
  *
- * FormData: file, sampleId? / productionSampleId? (when editing), existing? (ids
+ * FormData: file, sampleId? / productionSampleId? / inwardEntryId? (when editing), existing? (ids
  * already on the form, comma-separated — for duplicate detection before the
  * sample is saved)
  */
@@ -60,6 +60,7 @@ export async function POST(req: Request) {
   // Duplicate check: same bytes already on this sample / this form.
   const sampleId = (form.get("sampleId") as string | null) || null;
   const productionSampleId = (form.get("productionSampleId") as string | null) || null;
+  const inwardEntryId = (form.get("inwardEntryId") as string | null) || null;
   const existingIds = String(form.get("existing") ?? "")
     .split(",")
     .map((s) => s.trim())
@@ -70,12 +71,13 @@ export async function POST(req: Request) {
       OR: [
         ...(sampleId ? [{ sampleId }] : []),
         ...(productionSampleId ? [{ productionSampleId }] : []),
+        ...(inwardEntryId ? [{ inwardEntryId }] : []),
         ...(existingIds.length ? [{ id: { in: existingIds } }] : []),
       ],
     },
     select: { originalName: true },
   });
-  if (dup && (sampleId || productionSampleId || existingIds.length)) {
+  if (dup && (sampleId || productionSampleId || inwardEntryId || existingIds.length)) {
     return NextResponse.json(
       { error: `This file is already attached${dup.originalName !== name ? ` as “${dup.originalName}”` : ""}.` },
       { status: 409 },

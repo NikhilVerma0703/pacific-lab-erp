@@ -1,19 +1,20 @@
 import "server-only";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { sampleInclude } from "./service";
-import {
-  emptyFormulation,
-  emptyLabRow,
-  emptyRoyBody,
-  type FormulationInput,
-  type LabRowInput,
-  type RoyBodyInput,
-  type SampleBodyInput,
-  type SampleFormInput,
-} from "./schema";
-import { bodiesDesignText, bodyDesignsOrLegacy, unionLabels } from "./bodies";
+import { emptyVeinType, type VeinTypeInput } from "@/modules/forms/design";
+import { designSummary, orderTypes, typeOfPattern, type DesignTypeKey } from "@/modules/forms/design-types";
+import { emptyBodyReadings, type BodyReadingsInput } from "@/modules/forms/fields";
+import { emptyGritRow, emptyMaterialRow, type MaterialsInput } from "@/modules/forms/materials";
 import type { MasterRef } from "@/modules/master-data/types";
+import { bodiesDesignText } from "./bodies";
+import type { LabFormInput } from "./schema";
+import { sampleInclude } from "./service";
+
+/*
+ * Lab samples — the read model: the Review page, the form (edit), Recent
+ * Entries, and the Dashboard / Reports / Downloads (`SampleDetail`, which
+ * keeps the shape it had and adds what the rebuilt form records).
+ */
 
 // ── DTOs (plain JSON — safe to pass to client components) ────────────────────
 
@@ -33,11 +34,16 @@ export interface ComponentDTO {
 }
 
 export interface FormulationDTO {
-  role: "MAIN_BODY" | "DESIGN_ROY_BODY" | "VEIN_ROY_BODY";
+  role: "MAIN_BODY" | "DESIGN_ROY_BODY" | "VEIN_ROY_BODY" | "ROY_BODY" | "CHESSBOARD_BODY";
   components: ComponentDTO[];
+  /** Additives Used (Additives list) with their Quantity (gm). */
+  additives: { additive: ValueDTO; quantity: string | null }[];
   /** Roy Body (from Design) details — empty / null for plain formulations. */
   numberOfBodies: number | null;
   hasVein: boolean | null;
+  /** Vein details (Vein Details list). */
+  veinDetails: ValueDTO[];
+  /** Vein details typed as free text before the Vein Details list existed. */
   veinNotes: string | null;
   mixerType: ValueDTO | null;
   veinMethods: ValueDTO[];
@@ -79,8 +85,31 @@ export interface SampleBodyDTO {
   mixerType: ValueDTO | null;
   hasVein: boolean | null;
   veinMethods: ValueDTO[];
+  /** Vein details (Vein Details list). */
+  veinDetails: ValueDTO[];
+  /** Vein details typed as free text before the Vein Details list existed. */
   veinNotes: string | null;
   veinRoyBody: FormulationDTO | null;
+  postPress: LabValueDTO | null;
+  postPolish: LabValueDTO | null;
+}
+
+/** One selected design type (Plain Body – No) and its fields. */
+export interface DesignTypeDTO {
+  type: DesignTypeKey;
+  /** Roy Body / Chessboard: n. */
+  bodyCount: number | null;
+  /** Kreos / Vein: Vein Present. */
+  veinPresent: boolean | null;
+  mixerType: ValueDTO | null;
+  veinDetails: ValueDTO[];
+  colours: { colour: ValueDTO; quantity: string | null }[];
+}
+
+/** Roy Body k / Chessboard Body k of the rebuilt form: its Material Details and L, a, b. */
+export interface SpecialBodyDTO {
+  index: number;
+  materials: FormulationDTO | null;
   postPress: LabValueDTO | null;
   postPolish: LabValueDTO | null;
 }
@@ -100,8 +129,23 @@ export interface SampleDetail {
   /** The Inward / Outward entry recorded for this sample, if any. */
   inwardEntry: { id: string; serialNo: number } | null;
   numberOfBodies: number | null;
+  /**
+   * Plain Body – Yes (true) / No (false); null when not answered. For samples
+   * of the earlier form: No when any body was Non-Plain, Yes when all were Plain.
+   */
+  plainBody: boolean | null;
+  /**
+   * Plain Body – No: the design types with their fields. For samples of the
+   * earlier form: the design patterns that are design types (fields empty).
+   */
+  designTypes: DesignTypeDTO[];
+  /** Earlier form: design patterns that are not design types (kept on save). */
+  otherPatterns: ValueDTO[];
   /** Body 1 … n. */
   bodies: SampleBodyDTO[];
+  /** Roy Body 1 … n / Chessboard Body 1 … n of the rebuilt form. */
+  royBodies: SpecialBodyDTO[];
+  chessboardBodies: SpecialBodyDTO[];
   /** Saved before body-wise entry: one design / vein / material for the whole sample, shown on every body. */
   legacyBodies: boolean;
   remarks: string | null;
@@ -131,9 +175,11 @@ export function toFormulationDTO(f: FormulationWithComponents): FormulationDTO {
   return {
     role: f.role,
     components: f.components.map(toComponentDTO),
+    additives: f.additives.map((a) => ({ additive: a.additive, quantity: dec(a.quantity) })),
     numberOfBodies: f.numberOfBodies,
     hasVein: f.hasVein,
-    veinNotes: f.veinNotes,
+    veinDetails: f.veinDetails.map((d) => d.detail),
+    veinNotes: f.legacyVeinNotes,
     mixerType: f.mixerType,
     veinMethods: f.veinMethods.map((m) => m.method),
     measurements: f.measurements.map((m) => ({ stage: m.stage, bodyIndex: m.bodyIndex, l: dec(m.l), a: dec(m.a), b: dec(m.b) })),
@@ -155,7 +201,7 @@ function toBodies(s: SampleWithAll): { bodies: SampleBodyDTO[]; legacy: boolean 
     return x ? toFormulationDTO(x) : null;
   };
   const lab = (stage: "POST_PRESS" | "POST_POLISH", i: number) =>
-    labValue(s.measurements.find((m) => m.stage === stage && m.bodyIndex === i));
+    labValue(s.measurements.find((m) => m.part === "MAIN" && m.stage === stage && m.bodyIndex === i));
 
   if (s.bodies.length) {
     const n = Math.max(s.numberOfBodies ?? 0, ...s.bodies.map((b) => b.bodyIndex));
@@ -171,7 +217,8 @@ function toBodies(s: SampleWithAll): { bodies: SampleBodyDTO[]; legacy: boolean 
         mixerType: b?.mixerType ?? null,
         hasVein: b?.hasVein ?? null,
         veinMethods: b?.veinMethods.map((m) => m.method) ?? [],
-        veinNotes: b?.veinNotes ?? null,
+        veinDetails: b?.veinDetails.map((d) => d.detail) ?? [],
+        veinNotes: b?.legacyVeinNotes ?? null,
         veinRoyBody: f("VEIN_ROY_BODY", i),
         postPress: lab("POST_PRESS", i),
         postPolish: lab("POST_POLISH", i),
@@ -188,7 +235,7 @@ function toBodies(s: SampleWithAll): { bodies: SampleBodyDTO[]; legacy: boolean 
     s.veinMethods.length > 0 ||
     !!s.veinNotes ||
     s.formulations.length > 0;
-  const maxLab = Math.max(0, ...s.measurements.map((m) => m.bodyIndex));
+  const maxLab = Math.max(0, ...s.measurements.filter((m) => m.part === "MAIN").map((m) => m.bodyIndex));
   const n = s.numberOfBodies ?? (hasLegacy || maxLab ? Math.max(1, maxLab) : 0);
   const bodies = Array.from({ length: n }, (_, k): SampleBodyDTO => ({
     index: k + 1,
@@ -199,6 +246,7 @@ function toBodies(s: SampleWithAll): { bodies: SampleBodyDTO[]; legacy: boolean 
     mixerType: s.mixerType,
     hasVein: s.hasVein,
     veinMethods: s.veinMethods.map((m) => m.method),
+    veinDetails: [],
     veinNotes: s.veinNotes,
     veinRoyBody: f("VEIN_ROY_BODY", 1),
     postPress: lab("POST_PRESS", k + 1),
@@ -207,8 +255,73 @@ function toBodies(s: SampleWithAll): { bodies: SampleBodyDTO[]; legacy: boolean 
   return { bodies, legacy: hasLegacy && n > 0 };
 }
 
+/** The design types with their fields, in the form's order. */
+export function toDesignTypes(
+  details: {
+    type: DesignTypeKey;
+    bodyCount: number | null;
+    veinPresent: boolean | null;
+    mixerType: ValueDTO | null;
+    veinDetails: { detail: ValueDTO }[];
+    colours: { colour: ValueDTO; quantity: Prisma.Decimal | null }[];
+  }[],
+): DesignTypeDTO[] {
+  const order = orderTypes(details.map((d) => d.type));
+  return order.map((k) => {
+    const d = details.find((x) => x.type === k)!;
+    return {
+      type: d.type,
+      bodyCount: d.bodyCount,
+      veinPresent: d.veinPresent,
+      mixerType: d.mixerType,
+      veinDetails: d.veinDetails.map((v) => v.detail),
+      colours: d.colours.map((c) => ({ colour: c.colour, quantity: dec(c.quantity) })),
+    };
+  });
+}
+
+const blankType = (type: DesignTypeKey): DesignTypeDTO => ({ type, bodyCount: null, veinPresent: null, mixerType: null, veinDetails: [], colours: [] });
+
+/** Plain Body and the design types — as recorded by the rebuilt form, else read from the earlier form's design. */
+function designOf(s: SampleWithAll, bodies: SampleBodyDTO[]) {
+  const patterns = [...s.designPatterns.map((p) => p.pattern), ...bodies.flatMap((b) => b.designPatterns)];
+  const seen = new Set<string>();
+  const otherPatterns = patterns.filter((p) => !typeOfPattern(p) && !seen.has(p.id) && seen.add(p.id));
+  let plainBody: boolean | null;
+  if (s.designCategory !== null) plainBody = s.designCategory === "PLAIN_BODY";
+  else {
+    const cats = bodies.map((b) => b.designCategory).filter(Boolean);
+    plainBody = cats.includes("NON_PLAIN_BODY") ? false : cats.length ? true : null;
+  }
+  const recorded = toDesignTypes(s.designDetails);
+  const designTypes =
+    recorded.length || plainBody !== false
+      ? recorded
+      : orderTypes(patterns.map((p) => typeOfPattern(p)).filter((k): k is DesignTypeKey => !!k)).map(blankType);
+  return { plainBody, designTypes, otherPatterns: plainBody === false ? otherPatterns : [] };
+}
+
+/** Roy Body 1 … n / Chessboard Body 1 … n: Material Details and L, a, b. */
+function specialBodies(s: SampleWithAll, role: "ROY_BODY" | "CHESSBOARD_BODY", part: "ROY_BODY" | "CHESSBOARD", count: number | null | undefined): SpecialBodyDTO[] {
+  const fs = s.formulations.filter((f) => f.role === role);
+  const ms = s.measurements.filter((m) => m.part === part);
+  const n = Math.max(count ?? 0, ...fs.map((f) => f.bodyIndex), ...ms.map((m) => m.bodyIndex));
+  return Array.from({ length: n }, (_, k) => {
+    const i = k + 1;
+    const f = fs.find((x) => x.bodyIndex === i);
+    return {
+      index: i,
+      materials: f ? toFormulationDTO(f) : null,
+      postPress: labValue(ms.find((m) => m.stage === "POST_PRESS" && m.bodyIndex === i)),
+      postPolish: labValue(ms.find((m) => m.stage === "POST_POLISH" && m.bodyIndex === i)),
+    };
+  });
+}
+
 export function toDetail(s: SampleWithAll): SampleDetail {
   const { bodies, legacy } = toBodies(s);
+  const design = designOf(s, bodies);
+  const count = (t: DesignTypeKey) => design.designTypes.find((x) => x.type === t)?.bodyCount;
   return {
     id: s.id,
     serialNo: s.serialNo,
@@ -220,7 +333,12 @@ export function toDetail(s: SampleWithAll): SampleDetail {
     physicalSamplePresent: s.physicalSamplePresent,
     inwardEntry: s.inwardEntry,
     numberOfBodies: s.numberOfBodies,
+    plainBody: design.plainBody,
+    designTypes: design.designTypes,
+    otherPatterns: design.otherPatterns,
     bodies,
+    royBodies: design.designTypes.some((t) => t.type === "ROY_BODY") ? specialBodies(s, "ROY_BODY", "ROY_BODY", count("ROY_BODY")) : [],
+    chessboardBodies: design.designTypes.some((t) => t.type === "CHESSBOARD") ? specialBodies(s, "CHESSBOARD_BODY", "CHESSBOARD", count("CHESSBOARD")) : [],
     legacyBodies: legacy,
     remarks: s.remarks,
     attachments: s.attachments.map((a) => ({
@@ -243,117 +361,112 @@ export async function getSampleDetail(id: string): Promise<SampleDetail | null> 
 }
 
 /** Every master-value id a sample points at (so disabled ones still show when editing). */
-export function referencedValueIds(d: SampleDetail): string[] {
+export function sampleValueIds(d: SampleDetail): string[] {
   const ids = new Set<string>();
-  const add = (v: ValueDTO | null | undefined) => v && ids.add(v.id);
-  add(d.designNameRef);
-  const addF = (f: FormulationDTO | null) => {
+  if (d.designNameRef) ids.add(d.designNameRef.id);
+  const formulation = (f: FormulationDTO | null) => {
     if (!f) return;
-    f.components.forEach((c) => (add(c.material), add(c.size)));
-    f.veinRoyBody?.components.forEach((c) => (add(c.material), add(c.size)));
-    add(f.mixerType);
-    f.veinMethods.forEach(add);
+    for (const c of f.components) {
+      if (c.material) ids.add(c.material.id);
+      if (c.size) ids.add(c.size.id);
+    }
+    f.additives.forEach((a) => ids.add(a.additive.id));
   };
-  for (const b of d.bodies) {
-    addF(b.main);
-    addF(b.designRoyBody);
-    addF(b.veinRoyBody);
-    add(b.mixerType);
-    b.designPatterns.forEach(add);
-    b.veinMethods.forEach(add);
+  d.bodies.forEach((b) => formulation(b.main));
+  [...d.royBodies, ...d.chessboardBodies].forEach((b) => formulation(b.materials));
+  for (const t of d.designTypes) {
+    if (t.mixerType) ids.add(t.mixerType.id);
+    t.veinDetails.forEach((v) => ids.add(v.id));
+    t.colours.forEach((c) => ids.add(c.colour.id));
   }
   return [...ids];
 }
 
 // ── form prefill ─────────────────────────────────────────────────────────────
 
-const ref = (v: ValueDTO | null): MasterRef | null => (v ? { id: v.id, label: v.label } : null);
+const str = (v: string | null) => (v === null ? "" : String(Number(v)));
+const ref = (v: ValueDTO): MasterRef => ({ id: v.id, label: v.label });
+const yesNo = (v: boolean | null) => (v === null ? "" : v ? "YES" : "NO") as "" | "YES" | "NO";
+const unitOf = (c: ComponentDTO) => (c.unit === "PERCENT" ? ("PERCENT" as const) : c.unit === "GRAMS" ? ("GRAMS" as const) : ("" as const));
+const readingInput = (v: LabValueDTO | null) => (v ? { l: str(v.l), a: str(v.a), b: str(v.b) } : { l: "", a: "", b: "" });
+const bodyReadings = (pp: LabValueDTO | null, pl: LabValueDTO | null): BodyReadingsInput =>
+  pp || pl ? { postPress: readingInput(pp), postPolish: readingInput(pl) } : emptyBodyReadings();
 
-export function formulationToInput(f: Pick<FormulationDTO, "components"> | null | undefined): FormulationInput {
-  if (!f) return emptyFormulation();
-  const rows = (kind: ComponentDTO["kind"]) =>
-    f.components
-      .filter((c) => c.kind === kind)
-      .map((c) => ({
-        material: ref(c.material),
-        size: ref(c.size),
-        unit: (c.unit ?? "") as "" | "GRAMS" | "PERCENT",
-        quantity: c.quantity ? String(Number(c.quantity)) : "",
-      }));
-  const base = emptyFormulation();
-  const resins = rows("RESIN");
-  const grits = rows("GRIT");
-  const fillers = rows("FILLER");
+/** A formulation back into Material Details (one empty Resin / Grits / Filler row when none). */
+export function materialsInput(f: Pick<FormulationDTO, "components" | "additives"> | null): MaterialsInput {
+  const of = (k: ComponentDTO["kind"]) => (f?.components ?? []).filter((c) => c.kind === k);
+  const rows = (k: "RESIN" | "FILLER") => {
+    const list = of(k).map((c) => ({ material: c.material ? ref(c.material) : null, quantity: str(c.quantity), unit: unitOf(c) }));
+    return list.length ? list : [emptyMaterialRow()];
+  };
+  const grits = of("GRIT").map((c) => ({
+    material: c.material ? ref(c.material) : null,
+    size: c.size ? ref(c.size) : null,
+    quantity: str(c.quantity),
+    unit: unitOf(c),
+  }));
   return {
-    resins: resins.length ? resins : base.resins,
-    grits: grits.length ? grits : base.grits,
-    fillers: fillers.length ? fillers : base.fillers,
-    pigments: rows("PIGMENT"),
+    resins: rows("RESIN"),
+    grits: grits.length ? grits : [emptyGritRow()],
+    fillers: rows("FILLER"),
+    pigments: of("PIGMENT")
+      .filter((c) => c.material)
+      .map((c) => ({ colour: ref(c.material!), quantity: str(c.quantity), unit: unitOf(c) })),
+    additives: (f?.additives ?? []).map((a) => ({ colour: ref(a.additive), quantity: str(a.quantity) })),
   };
 }
 
-const labInput = (ms: MeasurementDTO[], n: number, stage: MeasurementDTO["stage"]) =>
-  Array.from({ length: n }, (_, i) => {
-    const m = ms.find((x) => x.stage === stage && x.bodyIndex === i + 1);
-    const s = (v: string | null) => (v === null ? "" : String(Number(v)));
-    return m ? { l: s(m.l), a: s(m.a), b: s(m.b) } : emptyLabRow();
-  });
-
-/** A saved Roy Body back into its form shape. */
-export function royBodyToInput(f: FormulationDTO | null | undefined): RoyBodyInput {
-  if (!f) return emptyRoyBody();
-  const n = f.numberOfBodies ?? 0;
-  return {
-    ...formulationToInput(f),
-    numberOfBodies: f.numberOfBodies === null ? "" : String(f.numberOfBodies),
-    hasVein: f.hasVein === null ? "" : f.hasVein ? "YES" : "NO",
-    mixerType: ref(f.mixerType),
-    veinMethods: f.veinMethods.map((m) => ({ id: m.id, label: m.label })),
-    veinNotes: f.veinNotes ?? "",
-    veinRoyBody: formulationToInput(f.veinRoyBody),
-    postPress: labInput(f.measurements, n, "POST_PRESS"),
-    postPolish: labInput(f.measurements, n, "POST_POLISH"),
+/** A saved sample back into the form. Samples of the earlier form open with what maps onto this form. */
+export function toLabFormInput(d: SampleDetail): LabFormInput {
+  const t = (k: DesignTypeKey) => d.designTypes.find((x) => x.type === k);
+  const vein = (k: "KREOS" | "VEIN"): VeinTypeInput => {
+    const x = t(k);
+    if (!x) return emptyVeinType();
+    return {
+      veinPresent: yesNo(x.veinPresent),
+      mixerType: x.mixerType ? ref(x.mixerType) : null,
+      veinDetails: x.veinDetails.map(ref),
+      colours: x.colours.map((c) => ({ colour: ref(c.colour), quantity: str(c.quantity) })),
+    };
   };
-}
-
-const labRowInput = (v: LabValueDTO | null): LabRowInput => {
-  const s = (x: string | null) => (x === null ? "" : String(Number(x)));
-  return v ? { l: s(v.l), a: s(v.a), b: s(v.b) } : emptyLabRow();
-};
-
-export function bodyToInput(b: SampleBodyDTO): SampleBodyInput {
-  return {
-    main: formulationToInput(b.main),
-    designCategory: b.designCategory ?? "",
-    designPatterns: b.designPatterns.map((p) => ({ id: p.id, label: p.label })),
-    designRoyBody: royBodyToInput(b.designRoyBody),
-    mixerType: ref(b.mixerType),
-    hasVein: b.hasVein === null ? "" : b.hasVein ? "YES" : "NO",
-    veinMethods: b.veinMethods.map((m) => ({ id: m.id, label: m.label })),
-    veinNotes: b.veinNotes ?? "",
-    veinRoyBody: formulationToInput(b.veinRoyBody),
-    postPress: labRowInput(b.postPress),
-    postPolish: labRowInput(b.postPolish),
+  const count = (k: DesignTypeKey, list: SpecialBodyDTO[]) => {
+    const c = t(k)?.bodyCount ?? (list.length || null);
+    return c === null ? "" : String(c);
   };
-}
-
-export function toFormInput(d: SampleDetail): SampleFormInput {
+  const plainBody = yesNo(d.plainBody);
   return {
+    sampleDate: d.sampleDate,
     serialNo: String(d.serialNo),
     slabNumber: d.slabNumber === null ? "" : String(d.slabNumber),
-    sampleDate: d.sampleDate,
     // A name typed before the Design Names list existed opens as a new (Other…) name.
-    designName: ref(d.designNameRef) ?? (d.designName ? { label: d.designName } : null),
-    physicalSamplePresent: d.physicalSamplePresent === null ? "" : d.physicalSamplePresent ? "YES" : "NO",
-    // A pre-body sample with a blank n but recorded details opens with its one body.
+    designName: d.designNameRef ? ref(d.designNameRef) : d.designName ? { label: d.designName } : null,
+    plainBody,
+    designTypes: plainBody === "NO" ? d.designTypes.map((x) => x.type) : [],
     numberOfBodies: d.numberOfBodies !== null ? String(d.numberOfBodies) : d.bodies.length ? String(d.bodies.length) : "",
-    bodies: d.bodies.map(bodyToInput),
+    // Saved before body-wise entry: its one set of materials goes to Body 1 (it is shown on every
+    // body, but was used once — saving it on every body would multiply it in Reports).
+    materials: d.bodies.map((b, i) => materialsInput(d.legacyBodies && i > 0 ? null : b.main)),
+    royBody: { count: count("ROY_BODY", d.royBodies), materials: d.royBodies.map((b) => materialsInput(b.materials)) },
+    kreos: vein("KREOS"),
+    carrara: { colours: (t("CARRARA")?.colours ?? []).map((c) => ({ colour: ref(c.colour), quantity: str(c.quantity) })) },
+    vein: vein("VEIN"),
+    chessboard: { count: count("CHESSBOARD", d.chessboardBodies), materials: d.chessboardBodies.map((b) => materialsInput(b.materials)) },
+    readings: d.bodies.map((b) => bodyReadings(b.postPress, b.postPolish)),
+    royReadings: d.royBodies.map((b) => bodyReadings(b.postPress, b.postPolish)),
+    chessboardReadings: d.chessboardBodies.map((b) => bodyReadings(b.postPress, b.postPolish)),
     attachmentIds: d.attachments.map((a) => a.id),
     remarks: d.remarks ?? "",
   };
 }
 
-// ── recent entries register ──────────────────────────────────────────────────
+/** "Plain Body" · "Roy Body, Carrara" — or, for the earlier form, the design per body. */
+export function sampleDesignText(d: SampleDetail): string {
+  const recorded = d.plainBody === true || d.designTypes.some((t) => t.bodyCount !== null || t.veinPresent !== null || t.colours.length > 0);
+  if (recorded || !d.bodies.length) return designSummary(d.plainBody, d.designTypes.map((t) => t.type));
+  return bodiesDesignText(d.bodies.map((b) => ({ designCategory: b.designCategory, patterns: b.designPatterns })));
+}
+
+// ── Recent Entries ───────────────────────────────────────────────────────────
 
 export interface RecentRow {
   id: string;
@@ -361,57 +474,40 @@ export interface RecentRow {
   slabNumber: number | null;
   sampleDate: string;
   status: "DRAFT" | "SUBMITTED";
+  designName: string | null;
   design: string;
-  mixerType: string | null;
-  vein: string;
+  numberOfBodies: number | null;
+  remarks: string | null;
+  files: number;
 }
 
-const bodySelect = {
-  orderBy: { bodyIndex: "asc" },
-  select: {
-    bodyIndex: true,
-    designCategory: true,
-    mixerType: { select: { label: true } },
-    designPatterns: { select: { pattern: { select: { label: true } } }, orderBy: { sortOrder: "asc" } },
-    veinMethods: { select: { method: { select: { label: true } } }, orderBy: { sortOrder: "asc" } },
-  },
-} as const;
+export const RECENT_PAGE_SIZE = 20;
 
-export async function getRecentSamples(take = 10): Promise<RecentRow[]> {
-  const rows = await prisma.labSample.findMany({
-    take,
+/** Saved samples, newest first, one page at a time. */
+export async function getRecentSamples(page = 1): Promise<{ rows: RecentRow[]; total: number; page: number; pages: number }> {
+  const total = await prisma.labSample.count();
+  const pages = Math.max(1, Math.ceil(total / RECENT_PAGE_SIZE));
+  const p = Math.min(Math.max(1, Math.trunc(page) || 1), pages);
+  const list = await prisma.labSample.findMany({
     orderBy: [{ createdAt: "desc" }, { serialNo: "desc" }],
-    select: {
-      id: true,
-      serialNo: true,
-      slabNumber: true,
-      sampleDate: true,
-      status: true,
-      numberOfBodies: true,
-      designCategory: true,
-      mixerType: { select: { label: true } },
-      designPatterns: { select: { pattern: { select: { label: true } } }, orderBy: { sortOrder: "asc" } },
-      veinMethods: { select: { method: { select: { label: true } } }, orderBy: { sortOrder: "asc" } },
-      bodies: bodySelect,
-    },
+    skip: (p - 1) * RECENT_PAGE_SIZE,
+    take: RECENT_PAGE_SIZE,
+    include: sampleInclude,
   });
-  return rows.map((r) => {
-    const designs = bodyDesignsOrLegacy(
-      r.bodies.map((b) => ({ bodyIndex: b.bodyIndex, designCategory: b.designCategory, patterns: b.designPatterns.map((p) => p.pattern) })),
-      { designCategory: r.designCategory, patterns: r.designPatterns.map((p) => p.pattern) },
-      r.numberOfBodies,
-    );
-    const mixers = r.bodies.length ? r.bodies.map((b) => (b.mixerType ? [b.mixerType] : [])) : [r.mixerType ? [r.mixerType] : []];
-    const veins = r.bodies.length ? r.bodies.map((b) => b.veinMethods.map((m) => m.method)) : [r.veinMethods.map((m) => m.method)];
+  const rows = list.map((s): RecentRow => {
+    const d = toDetail(s);
     return {
-      id: r.id,
-      serialNo: r.serialNo,
-      slabNumber: r.slabNumber,
-      sampleDate: r.sampleDate.toISOString().slice(0, 10),
-      status: r.status,
-      design: bodiesDesignText(designs),
-      mixerType: unionLabels(mixers).join(", ") || null,
-      vein: unionLabels(veins).join(", "),
+      id: d.id,
+      serialNo: d.serialNo,
+      slabNumber: d.slabNumber,
+      sampleDate: d.sampleDate,
+      status: d.status,
+      designName: d.designName,
+      design: sampleDesignText(d),
+      numberOfBodies: d.numberOfBodies,
+      remarks: d.remarks,
+      files: d.attachments.length,
     };
   });
+  return { rows, total, page: p, pages };
 }

@@ -1,18 +1,25 @@
 import "server-only";
 import { Prisma } from "@prisma/client";
 import { prisma, type Tx } from "@/lib/db";
-import { plantToday } from "@/lib/plant-time";
 import { audit } from "@/lib/audit";
 import { can } from "@/lib/permissions";
+import { plantToday } from "@/lib/plant-time";
 import type { CurrentUser } from "@/lib/session";
-import { MASTER, VALUE_CODE, type MasterCode } from "@/modules/master-data/catalog";
+import { otherPatternIds, patternFor } from "@/modules/forms/design-server";
+import type { DesignTypeKey } from "@/modules/forms/design-types";
+import { readingIsEmpty, type LabReadingData } from "@/modules/forms/fields";
+import { materialsAreEmpty, type MaterialsData } from "@/modules/forms/materials";
+import { formulationInclude } from "@/modules/formulation/service";
+import { MASTER, type MasterCode } from "@/modules/master-data/catalog";
 import { MasterValueError, resolveMasterRef } from "@/modules/master-data/service";
 import type { MasterRef } from "@/modules/master-data/types";
-import { lockNumbering, nextSerialNo, nextSlabNumber } from "./numbering";
-import { formulationInclude, writeFormulation, writeRoyBody } from "@/modules/formulation/service";
-import type { SampleFormData } from "./schema";
+import { lockLabNumbering, nextLabSerial, nextLabSlab } from "./numbering";
+import type { LabFormData } from "./schema";
 
-export class SampleSaveError extends Error {
+/** Today's date in the plant's time zone (YYYY-MM-DD). */
+export const todayInPlant = () => plantToday();
+
+export class LabSaveError extends Error {
   constructor(
     message: string,
     public fieldErrors?: Record<string, string>,
@@ -21,293 +28,345 @@ export class SampleSaveError extends Error {
   }
 }
 
-/** Today's date (YYYY-MM-DD) in the plant's time zone, not the server's. */
-export const todayInPlant = () => plantToday();
-
 const dateOnly = (s: string) => new Date(`${s}T00:00:00.000Z`);
+const decimal = (n: number | null) => (n === null ? null : new Prisma.Decimal(n));
 
-export async function codesOf(tx: Tx, ids: string[]): Promise<Set<string>> {
-  if (!ids.length) return new Set();
-  const rows = await tx.masterValue.findMany({ where: { id: { in: ids } }, select: { code: true } });
-  return new Set(rows.map((r) => r.code).filter((c): c is string => !!c));
+type Resolve = (code: MasterCode, ref: MasterRef | null | undefined) => Promise<string | null>;
+
+/**
+ * One body's Material Details as a formulation (role MAIN_BODY for Body i,
+ * ROY_BODY / CHESSBOARD_BODY for Roy / Chessboard Body k). Nothing entered →
+ * nothing written.
+ */
+async function writeMaterials(
+  tx: Tx,
+  resolve: Resolve,
+  sampleId: string,
+  role: "MAIN_BODY" | "ROY_BODY" | "CHESSBOARD_BODY",
+  bodyIndex: number,
+  m: MaterialsData,
+) {
+  if (materialsAreEmpty(m)) return;
+  const f = await tx.formulation.create({ data: { sampleId, role, bodyIndex } });
+  const rows: Prisma.FormulationComponentCreateManyInput[] = [];
+  const unit = (r: { unit: "GRAMS" | "PERCENT" | null; quantity: number | null }) => r.unit ?? (r.quantity !== null ? ("GRAMS" as const) : null);
+  let order = 0;
+  for (const r of m.resins) {
+    const materialId = await resolve(MASTER.RESIN, r.material);
+    if (materialId) rows.push({ formulationId: f.id, kind: "RESIN", materialId, unit: unit(r), quantity: decimal(r.quantity), sortOrder: order++ });
+  }
+  for (const r of m.grits) {
+    const materialId = await resolve(MASTER.GRIT, r.material);
+    if (!materialId) continue;
+    const sizeId = await resolve(MASTER.GRIT_SIZE, r.size);
+    rows.push({ formulationId: f.id, kind: "GRIT", materialId, sizeId, unit: unit(r), quantity: decimal(r.quantity), sortOrder: order++ });
+  }
+  for (const r of m.fillers) {
+    const materialId = await resolve(MASTER.FILLER, r.material);
+    if (materialId) rows.push({ formulationId: f.id, kind: "FILLER", materialId, unit: unit(r), quantity: decimal(r.quantity), sortOrder: order++ });
+  }
+  for (const r of m.pigments) {
+    const materialId = await resolve(MASTER.PIGMENT, r.colour);
+    if (materialId) rows.push({ formulationId: f.id, kind: "PIGMENT", materialId, unit: unit(r), quantity: decimal(r.quantity), sortOrder: order++ });
+  }
+  if (rows.length) await tx.formulationComponent.createMany({ data: rows });
+
+  const additives: Prisma.FormulationAdditiveCreateManyInput[] = [];
+  for (const r of m.additives) {
+    const additiveId = await resolve(MASTER.ADDITIVE, r.colour);
+    if (additiveId && !additives.some((a) => a.additiveId === additiveId)) {
+      additives.push({ formulationId: f.id, additiveId, quantity: decimal(r.quantity), sortOrder: additives.length });
+    }
+  }
+  if (additives.length) await tx.formulationAdditive.createMany({ data: additives });
 }
 
 /**
- * Create or update a sample, with everything under it, in one transaction.
- * On update the child rows are replaced wholesale — simpler and safer than
- * diffing, and the previous version is kept in the audit log.
+ * Create or update a lab sample in one transaction: Basic Information, the
+ * design (Plain Body – Yes / No, the design types with their fields), the
+ * Material Details of Body 1 … N, Roy Body 1 … n and Chessboard Body 1 … n,
+ * their L, a, b (Post Press / Post Polish), Sample Output files and Remarks.
+ * On update these are replaced; the previous version is kept in the audit log.
+ *
+ * The design is also written the way the Dashboard, Reports and Downloads
+ * read it: every body (SampleBody 1 … N) and the sample carry Plain / Non-Plain
+ * Body and the selected types as Design Patterns values.
+ *
+ * Samples saved with the earlier form keep what this form does not show:
+ * Physical Sample Available? and the linked Inward / Outward entry, each
+ * body's Vein (Mixer Type, How Vein Introduced, Vein details), the Roy Body
+ * formulations of Body 1 … N, and design patterns that are not design types.
  */
-export async function saveSample(args: {
+export async function saveLabSample(args: {
   id?: string;
-  data: SampleFormData;
-  status: "DRAFT" | "SUBMITTED";
+  data: LabFormData;
   user: CurrentUser;
   /** Create only: allocate S.No. / Slab even if the form carried a value (an untouched suggestion). */
   autoSerial?: boolean;
   autoSlab?: boolean;
-}): Promise<{
-  id: string;
-  serialNo: number;
-  slabNumber: number | null;
-  removedKeys: string[];
-  /** Physical Sample Available? — Yes → Inward / Outward entry, No → Rectification, null → not answered. */
-  physicalSampleAvailable: boolean | null;
-  /** Its physical sample is already recorded in an Inward / Outward entry. */
-  hasInwardEntry: boolean;
-}> {
-  const { id, data, status, user, autoSerial, autoSlab } = args;
+}): Promise<{ id: string; serialNo: number; slabNumber: number | null; removedKeys: string[] }> {
+  const { id, data, user, autoSerial, autoSlab } = args;
   const canOverride = can(user, "sample.overrideNumbers");
   const canDate = can(user, "sample.changeDate");
   const canAddMaster = can(user, "master.addFromForm");
   const canRemoveFiles = can(user, "attachment.remove");
 
-  return prisma.$transaction(
-    async (tx) => {
-      await lockNumbering(tx);
+  return prisma
+    .$transaction(
+      async (tx) => {
+        await lockLabNumbering(tx);
 
-      const existing = id
-        ? await tx.labSample.findUnique({
-            where: { id },
-            include: { attachments: { select: { id: true, storageKey: true } } },
-          })
-        : null;
-      if (id && !existing) throw new SampleSaveError("This sample no longer exists — it may have been deleted.");
+        const patternSelect = { pattern: { select: { id: true, code: true, label: true } } } as const;
+        const existing = id
+          ? await tx.labSample.findUnique({
+              where: { id },
+              include: {
+                attachments: { select: { id: true, storageKey: true } },
+                designPatterns: { select: patternSelect, orderBy: { sortOrder: "asc" } },
+                veinMethods: { select: { methodId: true }, orderBy: { sortOrder: "asc" } },
+                bodies: { include: { designPatterns: { select: patternSelect, orderBy: { sortOrder: "asc" } } }, orderBy: { bodyIndex: "asc" } },
+              },
+            })
+          : null;
+        if (id && !existing) throw new LabSaveError("This sample no longer exists — it may have been deleted.");
 
-      const resolve = async (code: MasterCode, ref: MasterRef | null | undefined) => {
-        if (ref && !ref.id && ref.label.trim() && !canAddMaster) {
-          throw new SampleSaveError(`You cannot add new list values (“${ref.label}”). Pick one from the list.`);
+        const resolve: Resolve = async (code, ref) => {
+          if (ref && !ref.id && ref.label.trim() && !canAddMaster) {
+            throw new LabSaveError(`You cannot add new list values (“${ref.label}”). Pick one from the list.`);
+          }
+          return resolveMasterRef(tx, code, ref, user.id);
+        };
+
+        // ── numbers ──────────────────────────────────────────────────────────
+        let serialNo: number;
+        let slabNumber: number | null;
+        if (existing) {
+          serialNo = canOverride && data.serialNo !== null ? data.serialNo : existing.serialNo;
+          slabNumber = canOverride ? data.slabNumber : (existing.slabNumber ?? (await nextLabSlab(tx)));
+        } else {
+          serialNo = canOverride && !autoSerial && data.serialNo !== null ? data.serialNo : await nextLabSerial(tx);
+          slabNumber = canOverride && !autoSlab ? data.slabNumber : await nextLabSlab(tx);
         }
-        return resolveMasterRef(tx, code, ref, user.id);
-      };
+        const fieldErrors: Record<string, string> = {};
+        const notMe = existing ? { NOT: { id: existing.id } } : {};
+        if (await tx.labSample.findFirst({ where: { serialNo, ...notMe }, select: { id: true } })) {
+          fieldErrors.serialNo = `S.No. ${serialNo} is already used by another sample.`;
+        }
+        if (slabNumber !== null) {
+          const clash = await tx.labSample.findFirst({ where: { slabNumber, ...notMe }, select: { serialNo: true } });
+          if (clash) fieldErrors.slabNumber = `Slab ${slabNumber} is already used by S.No. ${clash.serialNo}.`;
+        }
+        if (Object.keys(fieldErrors).length) throw new LabSaveError("Duplicate number — see the highlighted fields.", fieldErrors);
 
-      // ── numbers ────────────────────────────────────────────────────────────
-      let serialNo: number;
-      let slabNumber: number | null;
-      if (existing) {
-        serialNo = canOverride && data.serialNo !== null ? data.serialNo : existing.serialNo;
-        slabNumber = canOverride ? data.slabNumber : existing.slabNumber;
-      } else {
-        serialNo = canOverride && !autoSerial && data.serialNo !== null ? data.serialNo : await nextSerialNo(tx);
-        slabNumber = canOverride && !autoSlab ? data.slabNumber : await nextSlabNumber(tx);
-      }
-      const fieldErrors: Record<string, string> = {};
-      const serialClash = await tx.labSample.findFirst({
-        where: { serialNo, ...(existing ? { NOT: { id: existing.id } } : {}) },
-        select: { id: true },
-      });
-      if (serialClash) fieldErrors.serialNo = `S.No. ${serialNo} is already used by another sample.`;
-      if (slabNumber !== null) {
-        const slabClash = await tx.labSample.findFirst({
-          where: { slabNumber, ...(existing ? { NOT: { id: existing.id } } : {}) },
-          select: { serialNo: true },
+        // ── the sample ───────────────────────────────────────────────────────
+        const keptDate = existing ? existing.sampleDate.toISOString().slice(0, 10) : plantToday();
+        const sampleDate = dateOnly(canDate ? (data.sampleDate ?? keptDate) : keptDate);
+        const n = data.numberOfBodies ?? 0;
+        const designCategory = data.plainBody === null ? null : data.plainBody ? ("PLAIN_BODY" as const) : ("NON_PLAIN_BODY" as const);
+        const base = {
+          serialNo,
+          slabNumber,
+          sampleDate,
+          status: "SUBMITTED" as const,
+          designNameId: await resolve(MASTER.DESIGN_NAME, data.designName),
+          // A name typed before the Design Names list existed is now the list value.
+          legacyDesignName: null,
+          numberOfBodies: data.numberOfBodies,
+          designCategory,
+          remarks: data.remarks,
+          updatedById: user.id,
+        };
+        const sample = existing
+          ? await tx.labSample.update({ where: { id: existing.id }, data: base })
+          : await tx.labSample.create({ data: { ...base, createdById: user.id } });
+
+        if (existing) {
+          await tx.sampleDesignDetail.deleteMany({ where: { sampleId: sample.id } });
+          await tx.sampleDesignPattern.deleteMany({ where: { sampleId: sample.id } });
+          await tx.labMeasurement.deleteMany({ where: { sampleId: sample.id } });
+          await tx.formulation.deleteMany({ where: { sampleId: sample.id, role: { in: ["MAIN_BODY", "ROY_BODY", "CHESSBOARD_BODY"] } } });
+          // Roy Body formulations of the earlier form: kept for Body 1 … N.
+          await tx.formulation.deleteMany({ where: { sampleId: sample.id, bodyIndex: { gt: Math.max(n, 1) } } });
+          await tx.sampleBody.deleteMany({ where: { sampleId: sample.id, bodyIndex: { gt: n } } });
+        }
+
+        // ── design: the selected types, as Design Patterns values too ───────
+        const types: DesignTypeKey[] = data.plainBody === false ? data.designTypes : [];
+        const typePatternIds: string[] = [];
+        for (const t of types) typePatternIds.push(await patternFor(tx, t, user.id));
+        const withOthers = (others: string[]) => [...typePatternIds, ...others.filter((p) => !typePatternIds.includes(p))];
+        // Earlier-form patterns that are not design types stay (Plain Body – No only).
+        const keepAll =
+          existing && data.plainBody === false
+            ? otherPatternIds([...existing.designPatterns, ...existing.bodies.flatMap((b) => b.designPatterns)].map((p) => p.pattern))
+            : [];
+        const samplePatterns = withOthers(keepAll);
+        if (samplePatterns.length) {
+          await tx.sampleDesignPattern.createMany({ data: samplePatterns.map((patternId, k) => ({ sampleId: sample.id, patternId, sortOrder: k })) });
+        }
+
+        // Body 1 … N carry the same design (what Reports / Downloads read per body).
+        const legacyWhole = existing && existing.bodies.length === 0; // saved before body-wise entry
+        const legacyOthers = legacyWhole && data.plainBody === false ? otherPatternIds(existing.designPatterns.map((p) => p.pattern)) : [];
+        for (let i = 1; i <= n; i++) {
+          const had = existing?.bodies.find((b) => b.bodyIndex === i);
+          const others = data.plainBody === false ? (had ? otherPatternIds(had.designPatterns.map((p) => p.pattern)) : legacyOthers) : [];
+          const body = had
+            ? await tx.sampleBody.update({ where: { id: had.id }, data: { designCategory } })
+            : await tx.sampleBody.create({
+                data: {
+                  sampleId: sample.id,
+                  bodyIndex: i,
+                  designCategory,
+                  // Saved before body-wise entry: its one Vein applied to every body — keep showing it.
+                  ...(legacyWhole ? { mixerTypeId: existing.mixerTypeId, hasVein: existing.hasVein, legacyVeinNotes: existing.veinNotes } : {}),
+                },
+              });
+          if (had) await tx.sampleBodyDesignPattern.deleteMany({ where: { bodyId: body.id } });
+          const ids = withOthers(others);
+          if (ids.length) await tx.sampleBodyDesignPattern.createMany({ data: ids.map((patternId, k) => ({ bodyId: body.id, patternId, sortOrder: k })) });
+          if (!had && legacyWhole && existing.veinMethods.length) {
+            await tx.sampleBodyVeinMethod.createMany({ data: existing.veinMethods.map((m, k) => ({ bodyId: body.id, methodId: m.methodId, sortOrder: k })) });
+          }
+        }
+
+        // ── the design types' own fields ─────────────────────────────────────
+        for (const type of types) {
+          const vein = type === "KREOS" ? data.kreos : type === "VEIN" ? data.vein : null;
+          const veinOn = vein?.veinPresent === true;
+          const row = await tx.sampleDesignDetail.create({
+            data: {
+              sampleId: sample.id,
+              type,
+              bodyCount: type === "ROY_BODY" ? data.royBody.count : type === "CHESSBOARD" ? data.chessboard.count : null,
+              veinPresent: vein ? vein.veinPresent : null,
+              mixerTypeId: veinOn ? await resolve(MASTER.MIXER_TYPE, vein.mixerType) : null,
+            },
+          });
+          if (veinOn) {
+            const ids: string[] = [];
+            for (const ref of vein.veinDetails) {
+              const did = await resolve(MASTER.VEIN_DETAIL, ref);
+              if (did && !ids.includes(did)) ids.push(did);
+            }
+            if (ids.length) await tx.sampleDesignVeinDetail.createMany({ data: ids.map((detailId, k) => ({ designDetailId: row.id, detailId, sortOrder: k })) });
+          }
+          // Carrara always; Kreos / Vein only with Vein Present – Yes.
+          const colours = type === "CARRARA" ? data.carrara.colours : veinOn ? vein.colours : [];
+          const seen: string[] = [];
+          for (const c of colours) {
+            const cid = await resolve(MASTER.PIGMENT, c.colour);
+            if (!cid || seen.includes(cid)) continue;
+            seen.push(cid);
+            await tx.sampleDesignColour.create({ data: { designDetailId: row.id, colourId: cid, quantity: decimal(c.quantity), sortOrder: seen.length - 1 } });
+          }
+        }
+
+        // ── Material Details ─────────────────────────────────────────────────
+        const royN = types.includes("ROY_BODY") ? (data.royBody.count ?? 0) : 0;
+        const chessN = types.includes("CHESSBOARD") ? (data.chessboard.count ?? 0) : 0;
+        for (const [k, m] of data.materials.slice(0, n).entries()) await writeMaterials(tx, resolve, sample.id, "MAIN_BODY", k + 1, m);
+        for (const [k, m] of data.royBody.materials.slice(0, royN).entries()) await writeMaterials(tx, resolve, sample.id, "ROY_BODY", k + 1, m);
+        for (const [k, m] of data.chessboard.materials.slice(0, chessN).entries()) await writeMaterials(tx, resolve, sample.id, "CHESSBOARD_BODY", k + 1, m);
+
+        // ── L, a, b ──────────────────────────────────────────────────────────
+        const readings: Prisma.LabMeasurementCreateManyInput[] = [];
+        const add = (part: "MAIN" | "ROY_BODY" | "CHESSBOARD", list: { postPress: LabReadingData; postPolish: LabReadingData }[], count: number) =>
+          list.slice(0, count).forEach((r, k) => {
+            for (const [stage, v] of [["POST_PRESS", r.postPress], ["POST_POLISH", r.postPolish]] as const) {
+              if (!readingIsEmpty(v)) readings.push({ sampleId: sample.id, part, stage, bodyIndex: k + 1, l: v.l, a: v.a, b: v.b });
+            }
+          });
+        add("MAIN", data.readings, n);
+        add("ROY_BODY", data.royReadings, royN);
+        add("CHESSBOARD", data.chessboardReadings, chessN);
+        if (readings.length) await tx.labMeasurement.createMany({ data: readings });
+
+        // ── Sample Output (files) ────────────────────────────────────────────
+        const wanted = new Set(data.attachmentIds);
+        const current = existing?.attachments ?? [];
+        const toRemove = current.filter((a) => !wanted.has(a.id));
+        if (toRemove.length && !canRemoveFiles) throw new LabSaveError("You do not have permission to remove attached files.");
+        const newIds = [...wanted].filter((aid) => !current.some((a) => a.id === aid));
+        if (newIds.length) {
+          const ok = await tx.sampleAttachment.updateMany({
+            where: { id: { in: newIds }, sampleId: null, productionSampleId: null, inwardEntryId: null, uploadedById: user.id },
+            data: { sampleId: sample.id },
+          });
+          if (ok.count !== newIds.length) throw new LabSaveError("One of the uploaded files has expired. Please upload it again.");
+        }
+        if (toRemove.length) await tx.sampleAttachment.deleteMany({ where: { id: { in: toRemove.map((a) => a.id) } } });
+
+        await audit(tx, {
+          entityType: "LabSample",
+          entityId: sample.id,
+          action: existing ? "UPDATE" : "CREATE",
+          summary: `Lab Sample S.No. ${serialNo}${slabNumber ? ` / Slab ${slabNumber}` : ""}`,
+          snapshot: JSON.parse(JSON.stringify(data)) as Prisma.InputJsonValue,
+          userId: user.id,
         });
-        if (slabClash) fieldErrors.slabNumber = `Slab ${slabNumber} is already used by S.No. ${slabClash.serialNo}.`;
+
+        return { id: sample.id, serialNo, slabNumber, removedKeys: toRemove.map((a) => a.storageKey) };
+      },
+      { timeout: 30_000, maxWait: 10_000 },
+    )
+    .catch((e) => {
+      if (e instanceof MasterValueError) throw new LabSaveError(e.message);
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+        const target = String((e.meta as { target?: unknown })?.target ?? "");
+        if (target.includes("slab")) throw new LabSaveError("That slab number was just taken. Please save again.", { slabNumber: "Already used." });
+        throw new LabSaveError("That S.No. was just taken. Please save again.", { serialNo: "Already used." });
       }
-      if (Object.keys(fieldErrors).length) throw new SampleSaveError("Duplicate number — see the highlighted fields.", fieldErrors);
-
-      // ── date ───────────────────────────────────────────────────────────────
-      const sampleDate = canDate
-        ? dateOnly(data.sampleDate ?? todayInPlant())
-        : existing
-          ? existing.sampleDate
-          : dateOnly(todayInPlant());
-
-      const base = {
-        serialNo,
-        slabNumber,
-        sampleDate,
-        status,
-        designNameId: await resolve(MASTER.DESIGN_NAME, data.designName),
-        // Moved into the Design Names list by this save.
-        legacyDesignName: null,
-        numberOfBodies: data.numberOfBodies,
-        // Design and Vein now live on each body (SampleBody). The sample-level
-        // columns only remain for samples saved before bodies existed.
-        designCategory: null,
-        mixerTypeId: null,
-        hasVein: null,
-        veinNotes: null,
-        remarks: data.remarks,
-        physicalSamplePresent: data.physicalSamplePresent,
-        updatedById: user.id,
-      };
-
-      const sample = existing
-        ? await tx.labSample.update({ where: { id: existing.id }, data: base })
-        : await tx.labSample.create({ data: { ...base, createdById: user.id } });
-
-      if (existing) {
-        await tx.formulation.deleteMany({ where: { sampleId: sample.id } });
-        await tx.sampleDesignPattern.deleteMany({ where: { sampleId: sample.id } });
-        await tx.sampleVeinMethod.deleteMany({ where: { sampleId: sample.id } });
-        await tx.labMeasurement.deleteMany({ where: { sampleId: sample.id } });
-        await tx.sampleBody.deleteMany({ where: { sampleId: sample.id } });
-      }
-
-      // Body 1 … n — each body on its own: Material Choices, Design, Vein, L/a/b.
-      const n = data.numberOfBodies ?? 0;
-      const labRows: Prisma.LabMeasurementCreateManyInput[] = [];
-      for (const [i, body] of data.bodies.slice(0, n).entries()) {
-        const bodyIndex = i + 1;
-        const veinApplies = body.hasVein !== false;
-        const row = await tx.sampleBody.create({
-          data: {
-            sampleId: sample.id,
-            bodyIndex,
-            designCategory: body.designCategory,
-            mixerTypeId: await resolve(MASTER.MIXER_TYPE, body.mixerType),
-            hasVein: body.hasVein,
-            veinNotes: veinApplies ? body.veinNotes : null,
-          },
-        });
-
-        await writeFormulation(tx, { sampleId: sample.id }, "MAIN_BODY", body.main, resolve, bodyIndex);
-
-        // Design
-        if (body.designCategory === "NON_PLAIN_BODY") {
-          const patternIds: string[] = [];
-          for (const ref of body.designPatterns) {
-            const pid = await resolve(MASTER.DESIGN_PATTERN, ref);
-            if (pid && !patternIds.includes(pid)) patternIds.push(pid);
-          }
-          if (patternIds.length) {
-            await tx.sampleBodyDesignPattern.createMany({
-              data: patternIds.map((patternId, k) => ({ bodyId: row.id, patternId, sortOrder: k })),
-            });
-          }
-          if ((await codesOf(tx, patternIds)).has(VALUE_CODE.ROY_BODY)) {
-            await writeRoyBody(tx, { sampleId: sample.id }, "DESIGN_ROY_BODY", body.designRoyBody, resolve, bodyIndex);
-          }
-        }
-
-        // Vein
-        if (veinApplies) {
-          const methodIds: string[] = [];
-          for (const ref of body.veinMethods) {
-            const mid = await resolve(MASTER.VEIN_METHOD, ref);
-            if (mid && !methodIds.includes(mid)) methodIds.push(mid);
-          }
-          if (methodIds.length) {
-            await tx.sampleBodyVeinMethod.createMany({
-              data: methodIds.map((methodId, k) => ({ bodyId: row.id, methodId, sortOrder: k })),
-            });
-          }
-          if ((await codesOf(tx, methodIds)).has(VALUE_CODE.ROY_BODY)) {
-            await writeFormulation(tx, { sampleId: sample.id }, "VEIN_ROY_BODY", body.veinRoyBody, resolve, bodyIndex);
-          }
-        }
-
-        // This body's L / a / b — only where something was measured.
-        for (const [stage, r] of [
-          ["POST_PRESS", body.postPress],
-          ["POST_POLISH", body.postPolish],
-        ] as const) {
-          if (r.l === null && r.a === null && r.b === null) continue;
-          labRows.push({ sampleId: sample.id, stage, bodyIndex, l: r.l, a: r.a, b: r.b });
-        }
-      }
-      if (labRows.length) await tx.labMeasurement.createMany({ data: labRows });
-
-      // ── attachments ────────────────────────────────────────────────────────
-      const wanted = new Set(data.attachmentIds);
-      const current = existing?.attachments ?? [];
-      const toRemove = current.filter((a) => !wanted.has(a.id));
-      if (toRemove.length && !canRemoveFiles) {
-        throw new SampleSaveError("You do not have permission to remove attached files.");
-      }
-      const newIds = [...wanted].filter((aid) => !current.some((a) => a.id === aid));
-      if (newIds.length) {
-        const ok = await tx.sampleAttachment.updateMany({
-          where: { id: { in: newIds }, sampleId: null, uploadedById: user.id },
-          data: { sampleId: sample.id },
-        });
-        if (ok.count !== newIds.length) {
-          throw new SampleSaveError("One of the uploaded files has expired. Please upload it again.");
-        }
-      }
-      if (toRemove.length) {
-        await tx.sampleAttachment.deleteMany({ where: { id: { in: toRemove.map((a) => a.id) } } });
-      }
-
-      await audit(tx, {
-        entityType: "LabSample",
-        entityId: sample.id,
-        action: existing ? "UPDATE" : "CREATE",
-        summary: `S.No. ${serialNo}${slabNumber ? ` / Slab ${slabNumber}` : ""} (${status})`,
-        snapshot: JSON.parse(JSON.stringify(data)) as Prisma.InputJsonValue,
-        userId: user.id,
-      });
-
-      return {
-        id: sample.id,
-        serialNo,
-        slabNumber,
-        removedKeys: toRemove.map((a) => a.storageKey),
-        physicalSampleAvailable: data.physicalSamplePresent,
-        hasInwardEntry: !!(await tx.inwardOutwardEntry.findFirst({ where: { labSampleId: sample.id }, select: { id: true } })),
-      };
-    },
-    { timeout: 20_000, maxWait: 10_000 },
-  ).catch((e) => {
-    if (e instanceof MasterValueError) throw new SampleSaveError(e.message);
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-      const target = String((e.meta as { target?: unknown })?.target ?? "");
-      if (target.includes("slab")) throw new SampleSaveError("That slab number was just taken. Please save again.", { slabNumber: "Already used." });
-      throw new SampleSaveError("That S.No. was just taken. Please save again.", { serialNo: "Already used." });
-    }
-    throw e;
-  });
+      throw e;
+    });
 }
 
-/**
- * Permanently delete a sample (as the brief requires), after writing its full
- * record to the audit log so the history is not lost.
- */
-export async function deleteSample(id: string, user: CurrentUser): Promise<{ serialNo: number; removedKeys: string[] }> {
+/** Permanently delete a sample, after writing its full record to the audit log. */
+export async function deleteLabSample(id: string, user: CurrentUser): Promise<{ serialNo: number; removedKeys: string[] }> {
   return prisma.$transaction(async (tx) => {
     const snapshot = await tx.labSample.findUnique({ where: { id }, include: sampleInclude });
-    if (!snapshot) throw new SampleSaveError("This sample was already deleted.");
+    if (!snapshot) throw new LabSaveError("This sample was already deleted.");
     await audit(tx, {
       entityType: "LabSample",
       entityId: id,
       action: "DELETE",
-      summary: `Deleted S.No. ${snapshot.serialNo}${snapshot.slabNumber ? ` / Slab ${snapshot.slabNumber}` : ""}`,
+      summary: `Deleted Lab Sample S.No. ${snapshot.serialNo}${snapshot.slabNumber ? ` / Slab ${snapshot.slabNumber}` : ""}`,
       snapshot: JSON.parse(JSON.stringify(snapshot)) as Prisma.InputJsonValue,
       userId: user.id,
     });
-    await tx.labSample.delete({ where: { id } }); // children cascade
+    // Design, materials, readings and files cascade; a linked Inward / Outward entry stays (unlinked).
+    await tx.labSample.delete({ where: { id } });
     return { serialNo: snapshot.serialNo, removedKeys: snapshot.attachments.map((a) => a.storageKey) };
   });
 }
 
+const valueSelect = { select: { id: true, label: true, code: true, isActive: true } } as const;
+
+/** Everything a sample holds — for the Review page, the form, Recent Entries and Downloads. */
 export const sampleInclude = {
-  mixerType: { select: { id: true, label: true, code: true, isActive: true } },
-  designNameValue: { select: { id: true, label: true, code: true, isActive: true } },
+  mixerType: valueSelect,
+  designNameValue: valueSelect,
   createdBy: { select: { name: true } },
   updatedBy: { select: { name: true } },
   formulations: { include: formulationInclude },
-  designPatterns: {
-    include: { pattern: { select: { id: true, label: true, code: true, isActive: true } } },
-    orderBy: { sortOrder: "asc" },
+  designPatterns: { include: { pattern: valueSelect }, orderBy: { sortOrder: "asc" } },
+  designDetails: {
+    include: {
+      mixerType: valueSelect,
+      veinDetails: { include: { detail: valueSelect }, orderBy: { sortOrder: "asc" } },
+      colours: { include: { colour: valueSelect }, orderBy: { sortOrder: "asc" } },
+    },
   },
-  veinMethods: {
-    include: { method: { select: { id: true, label: true, code: true, isActive: true } } },
-    orderBy: { sortOrder: "asc" },
-  },
-  measurements: { orderBy: [{ stage: "asc" }, { bodyIndex: "asc" }] },
+  veinMethods: { include: { method: valueSelect }, orderBy: { sortOrder: "asc" } },
+  measurements: { orderBy: [{ part: "asc" }, { stage: "asc" }, { bodyIndex: "asc" }] },
   attachments: { orderBy: { createdAt: "asc" } },
   inwardEntry: { select: { id: true, serialNo: true } },
   bodies: {
     include: {
-      mixerType: { select: { id: true, label: true, code: true, isActive: true } },
-      designPatterns: {
-        include: { pattern: { select: { id: true, label: true, code: true, isActive: true } } },
-        orderBy: { sortOrder: "asc" },
-      },
-      veinMethods: {
-        include: { method: { select: { id: true, label: true, code: true, isActive: true } } },
-        orderBy: { sortOrder: "asc" },
-      },
+      mixerType: valueSelect,
+      designPatterns: { include: { pattern: valueSelect }, orderBy: { sortOrder: "asc" } },
+      veinMethods: { include: { method: valueSelect }, orderBy: { sortOrder: "asc" } },
+      veinDetails: { include: { detail: valueSelect }, orderBy: { sortOrder: "asc" } },
     },
     orderBy: { bodyIndex: "asc" },
   },

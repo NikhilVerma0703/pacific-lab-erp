@@ -2,7 +2,6 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { plantToday } from "@/lib/plant-time";
 import { MASTER } from "@/modules/master-data/catalog";
-import { bodyDesignsOrLegacy, designNamesOf } from "@/modules/samples/bodies";
 import { tallyDesigns, type DesignTally } from "./designs";
 
 export interface DashboardData {
@@ -11,6 +10,7 @@ export interface DashboardData {
     total: number;
     lab: number;
     line: number;
+    /** Design Names recorded today (Design Name / Sample Design Name only — not Design / Design Pattern). */
     designs: DesignTally[];
   };
   overall: {
@@ -18,17 +18,10 @@ export interface DashboardData {
     lab: number;
     line: number;
     designs: number;
-    companies: number;
-    rectification: number;
     production: number;
   };
 }
 
-const patternSelect = { select: { pattern: { select: { label: true } } }, orderBy: { sortOrder: "asc" } } as const;
-const bodySelect = {
-  orderBy: { bodyIndex: "asc" },
-  select: { bodyIndex: true, designCategory: true, designPatterns: patternSelect },
-} as const;
 
 /**
  * Line samples are not recorded yet, so Line is 0 and every lab sample counts
@@ -42,8 +35,6 @@ export async function getDashboard(): Promise<DashboardData> {
     todaySamples,
     todayInward,
     totalSamples,
-    rectification,
-    companies,
     samplePatterns,
     inwardPatterns,
     plainUsed,
@@ -52,32 +43,16 @@ export async function getDashboard(): Promise<DashboardData> {
     sampleNames,
     production,
   ] = await Promise.all([
+    // Today: only the Design Name of each lab sample and the Sample Design Name of each Inward / Outward entry.
     prisma.labSample.findMany({
       where: { sampleDate: day },
-      select: {
-        numberOfBodies: true,
-        designCategory: true,
-        legacyDesignName: true,
-        designNameValue: { select: { label: true } },
-        designPatterns: patternSelect,
-        bodies: bodySelect,
-      },
+      select: { legacyDesignName: true, designNameValue: { select: { label: true } } },
     }),
     prisma.inwardOutwardEntry.findMany({
       where: { entryDate: day },
-      select: {
-        numberOfBodies: true,
-        designCategory: true,
-        legacySampleDesignName: true,
-        designNameValue: { select: { label: true } },
-        designPatterns: patternSelect,
-        bodies: bodySelect,
-      },
+      select: { legacySampleDesignName: true, designNameValue: { select: { label: true } } },
     }),
     prisma.labSample.count(),
-    // Physical Sample Available? = No — the Rectification list in Inward / Outward.
-    prisma.labSample.count({ where: { physicalSamplePresent: false } }),
-    prisma.masterValue.count({ where: { isActive: true, category: { code: MASTER.COMPANY } } }),
     Promise.all([
       prisma.sampleDesignPattern.findMany({ distinct: ["patternId"], select: { pattern: { select: { label: true } } } }),
       prisma.sampleBodyDesignPattern.findMany({ distinct: ["patternId"], select: { pattern: { select: { label: true } } } }),
@@ -114,19 +89,11 @@ export async function getDashboard(): Promise<DashboardData> {
     prisma.productionSample.count(),
   ]);
 
-  // Every body counts: a record contributes each design of any of its bodies once.
-  type WithBodies = Pick<(typeof todayInward)[number], "numberOfBodies" | "designCategory" | "designPatterns" | "bodies">;
-  const bodyDesigns = (x: WithBodies) =>
-    designNamesOf(
-      bodyDesignsOrLegacy(
-        x.bodies.map((b) => ({ bodyIndex: b.bodyIndex, designCategory: b.designCategory, patterns: b.designPatterns.map((p) => p.pattern) })),
-        { designCategory: x.designCategory, patterns: x.designPatterns.map((p) => p.pattern) },
-        x.numberOfBodies,
-      ),
-    );
+  // Designs Worked On Today = the Design Names recorded today, each once (ignoring case);
+  // Design / Design Pattern values are not counted here.
   const todayDesigns = tallyDesigns([
-    ...todaySamples.flatMap((s) => [...bodyDesigns(s), s.designNameValue?.label ?? s.legacyDesignName]),
-    ...todayInward.flatMap((e) => [...bodyDesigns(e), e.designNameValue?.label ?? e.legacySampleDesignName]),
+    ...todaySamples.map((s) => s.designNameValue?.label ?? s.legacyDesignName),
+    ...todayInward.map((e) => e.designNameValue?.label ?? e.legacySampleDesignName),
   ]);
 
   const allDesigns = tallyDesigns([
@@ -152,8 +119,6 @@ export async function getDashboard(): Promise<DashboardData> {
       lab: totalSamples,
       line: 0,
       designs: allDesigns.length,
-      companies,
-      rectification,
       production,
     },
   };

@@ -6,13 +6,15 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { fail, type ActionResult } from "@/lib/action-result";
-import { cleanLabel, MAX_LABEL_LENGTH, normalizeKey } from "@/lib/normalize";
+import { cleanLabel, compareLabels, normalizeKey } from "@/lib/normalize";
 import { PermissionError, requirePermission } from "@/lib/session";
+import { labelLimit } from "./catalog";
 
-const labelSchema = z
-  .string()
-  .transform(cleanLabel)
-  .pipe(z.string().min(1, "Enter a value.").max(MAX_LABEL_LENGTH, `Keep it under ${MAX_LABEL_LENGTH} characters.`));
+const labelSchema = z.string().transform(cleanLabel).pipe(z.string().min(1, "Enter a value."));
+
+/** Each list has its own longest value (Vein Details allows short phrases). */
+const tooLong = (label: string, code: string) =>
+  label.length > labelLimit(code) ? `Keep it under ${labelLimit(code)} characters.` : null;
 
 function duplicateMessage(label: string) {
   return `“${label}” already exists in this list (matching ignores case and spaces).`;
@@ -38,6 +40,8 @@ export async function createMasterValue(input: { categoryId: string; label: stri
 
     const cat = await prisma.masterCategory.findUnique({ where: { id: input.categoryId } });
     if (!cat) return fail("That list no longer exists.");
+    const long = tooLong(label, cat.code);
+    if (long) return fail(long, { label: long });
 
     const existing = await prisma.masterValue.findUnique({
       where: { categoryId_normalizedKey: { categoryId: cat.id, normalizedKey: key } },
@@ -78,8 +82,10 @@ export async function renameMasterValue(input: { id: string; label: string }): P
     const label = parsed.data;
     const key = normalizeKey(label);
 
-    const current = await prisma.masterValue.findUnique({ where: { id: input.id } });
+    const current = await prisma.masterValue.findUnique({ where: { id: input.id }, include: { category: { select: { code: true } } } });
     if (!current) return fail("That value no longer exists.");
+    const long = tooLong(label, current.category.code);
+    if (long) return fail(long, { label: long });
 
     const clash = await prisma.masterValue.findFirst({
       where: { categoryId: current.categoryId, normalizedKey: key, NOT: { id: current.id } },
@@ -142,8 +148,10 @@ export async function moveMasterValue(input: { id: string; direction: "up" | "do
     const siblings = await prisma.masterValue.findMany({
       where: { categoryId: v.categoryId, isActive: true },
       orderBy: [{ sortOrder: "asc" }, { label: "asc" }],
-      select: { id: true },
+      select: { id: true, label: true, sortOrder: true },
     });
+    // Same order as the dropdown: position, then alphabetical ignoring case.
+    siblings.sort((a, b) => a.sortOrder - b.sortOrder || compareLabels(a.label, b.label));
     const idx = siblings.findIndex((s) => s.id === v.id);
     const swap = input.direction === "up" ? idx - 1 : idx + 1;
     if (idx < 0 || swap < 0 || swap >= siblings.length) return { ok: true, data: undefined };
