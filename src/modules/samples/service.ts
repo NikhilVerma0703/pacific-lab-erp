@@ -9,11 +9,13 @@ import { otherPatternIds, patternFor } from "@/modules/forms/design-server";
 import type { DesignTypeKey } from "@/modules/forms/design-types";
 import { readingIsEmpty, type LabReadingData } from "@/modules/forms/fields";
 import { materialsAreEmpty, type MaterialsData } from "@/modules/forms/materials";
-import { formulationInclude } from "@/modules/formulation/service";
 import { MASTER, type MasterCode } from "@/modules/master-data/catalog";
 import { MasterValueError, resolveMasterRef } from "@/modules/master-data/service";
 import type { MasterRef } from "@/modules/master-data/types";
+import { sampleInclude } from "./include";
 import { lockLabNumbering, nextLabSerial, nextLabSlab } from "./numbering";
+import { writeLabRecord } from "./record-store";
+import { writeInwardRecord } from "@/modules/inward-outward/record-store";
 import type { LabFormData } from "./schema";
 
 /** Today's date in the plant's time zone (YYYY-MM-DD). */
@@ -297,6 +299,9 @@ export async function saveLabSample(args: {
         }
         if (toRemove.length) await tx.sampleAttachment.deleteMany({ where: { id: { in: toRemove.map((a) => a.id) } } });
 
+        // ── Lab Sample Database: the complete copy of this sample ───────────
+        await writeLabRecord(tx, sample.id);
+
         await audit(tx, {
           entityType: "LabSample",
           entityId: sample.id,
@@ -334,40 +339,12 @@ export async function deleteLabSample(id: string, user: CurrentUser): Promise<{ 
       snapshot: JSON.parse(JSON.stringify(snapshot)) as Prisma.InputJsonValue,
       userId: user.id,
     });
-    // Design, materials, readings and files cascade; a linked Inward / Outward entry stays (unlinked).
+    // Design, materials, readings, files and its Lab Sample Database copy cascade;
+    // a linked Inward / Outward entry stays (unlinked) — its copy is refreshed.
     await tx.labSample.delete({ where: { id } });
+    if (snapshot.inwardEntry) await writeInwardRecord(tx, snapshot.inwardEntry.id);
     return { serialNo: snapshot.serialNo, removedKeys: snapshot.attachments.map((a) => a.storageKey) };
   });
 }
 
-const valueSelect = { select: { id: true, label: true, code: true, isActive: true } } as const;
-
-/** Everything a sample holds — for the Review page, the form, Recent Entries and Downloads. */
-export const sampleInclude = {
-  mixerType: valueSelect,
-  designNameValue: valueSelect,
-  createdBy: { select: { name: true } },
-  updatedBy: { select: { name: true } },
-  formulations: { include: formulationInclude },
-  designPatterns: { include: { pattern: valueSelect }, orderBy: { sortOrder: "asc" } },
-  designDetails: {
-    include: {
-      mixerType: valueSelect,
-      veinDetails: { include: { detail: valueSelect }, orderBy: { sortOrder: "asc" } },
-      colours: { include: { colour: valueSelect }, orderBy: { sortOrder: "asc" } },
-    },
-  },
-  veinMethods: { include: { method: valueSelect }, orderBy: { sortOrder: "asc" } },
-  measurements: { orderBy: [{ part: "asc" }, { stage: "asc" }, { bodyIndex: "asc" }] },
-  attachments: { orderBy: { createdAt: "asc" } },
-  inwardEntry: { select: { id: true, serialNo: true } },
-  bodies: {
-    include: {
-      mixerType: valueSelect,
-      designPatterns: { include: { pattern: valueSelect }, orderBy: { sortOrder: "asc" } },
-      veinMethods: { include: { method: valueSelect }, orderBy: { sortOrder: "asc" } },
-      veinDetails: { include: { detail: valueSelect }, orderBy: { sortOrder: "asc" } },
-    },
-    orderBy: { bodyIndex: "asc" },
-  },
-} satisfies Prisma.LabSampleInclude;
+export { sampleInclude };

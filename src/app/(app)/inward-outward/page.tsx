@@ -12,12 +12,15 @@ import { inwardFormPermissions } from "@/modules/inward-outward/page-helpers";
 import { getInwardRegister, getRectification, REGISTER_PAGE_SIZE } from "@/modules/inward-outward/queries";
 import { newInwardInput } from "@/modules/inward-outward/schema";
 import { getMasterOptions } from "@/modules/master-data/service";
+import { ensureRecordStores } from "@/modules/records/sync";
 
 export const metadata = { title: "Sample Inward / Outward" };
 export const dynamic = "force-dynamic";
 
 export default async function InwardOutwardPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   const user = await requireUser();
+  // Records saved before the Lab Sample / Inward-Outward databases existed get their copy (once per server start).
+  await ensureRecordStores();
   if (!can(user, "inward.view")) notFound();
   const canCreate = can(user, "inward.create");
   const { page } = await searchParams;

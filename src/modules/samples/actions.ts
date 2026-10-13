@@ -5,6 +5,9 @@ import { fail, type ActionResult } from "@/lib/action-result";
 import { PermissionError, requirePermission } from "@/lib/session";
 import { storage } from "@/lib/storage";
 import { fieldErrorsOf } from "@/modules/forms/fields";
+import type { MasterRef } from "@/modules/master-data/types";
+import type { DesignSuggestion } from "./design-suggestion";
+import { inwardDesignSuggestions } from "./inward-link";
 import { suggestLabNumbers } from "./numbering";
 import { labFormSchema, visibleLabInput, type LabFormInput } from "./schema";
 import { deleteLabSample, LabSaveError, saveLabSample } from "./service";
@@ -68,4 +71,18 @@ export async function deleteLabSampleAction(id: string): Promise<ActionResult> {
 export async function nextLabNumbersAction() {
   await requirePermission("sample.create");
   return suggestLabNumbers();
+}
+
+/**
+ * Saved designs of a Design Name in the Sample Inward / Outward Database —
+ * shown beside the Lab Sample form's Design Name (read-only).
+ */
+export async function inwardDesignSuggestionsAction(ref: MasterRef | null): Promise<DesignSuggestion[]> {
+  try {
+    await requirePermission("sample.view");
+    return await inwardDesignSuggestions(ref);
+  } catch (e) {
+    if (!(e instanceof PermissionError)) console.error("inwardDesignSuggestionsAction", e);
+    return [];
+  }
 }

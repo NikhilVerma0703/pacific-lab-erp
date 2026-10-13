@@ -6,22 +6,31 @@ import { requireUser } from "@/lib/session";
 import { maxUploadMb } from "@/lib/uploads";
 import { getMasterOptions } from "@/modules/master-data/service";
 import { LabSampleForm } from "@/modules/samples/components/LabSampleForm";
+import { inwardDesignNameOptions } from "@/modules/samples/inward-link";
 import { RecentEntries } from "@/modules/samples/components/RecentEntries";
 import { suggestLabNumbers } from "@/modules/samples/numbering";
 import { labFormPermissions } from "@/modules/samples/page-helpers";
 import { getRecentSamples, RECENT_PAGE_SIZE } from "@/modules/samples/queries";
 import { newLabInput } from "@/modules/samples/schema";
+import { ensureRecordStores } from "@/modules/records/sync";
 
 export const metadata = { title: "Sample Data Entry" };
 export const dynamic = "force-dynamic";
 
 export default async function SamplesPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   const user = await requireUser();
+  // Records saved before the Lab Sample / Inward-Outward databases existed get their copy (once per server start).
+  await ensureRecordStores();
   if (!can(user, "sample.view")) notFound();
   const canCreate = can(user, "sample.create");
   const { page } = await searchParams;
 
-  const [options, numbers, recent] = await Promise.all([getMasterOptions(), suggestLabNumbers(), getRecentSamples(Number(page) || 1)]);
+  const [options, designNames, numbers, recent] = await Promise.all([
+    getMasterOptions(),
+    inwardDesignNameOptions(),
+    suggestLabNumbers(),
+    getRecentSamples(Number(page) || 1),
+  ]);
 
   return (
     <>
@@ -35,6 +44,7 @@ export default async function SamplesPage({ searchParams }: { searchParams: Prom
           defaults={newLabInput({ ...numbers, today: plantToday() })}
           attachments={[]}
           options={options}
+          designNameOptions={designNames}
           permissions={labFormPermissions(user)}
           maxUploadMb={maxUploadMb()}
         />

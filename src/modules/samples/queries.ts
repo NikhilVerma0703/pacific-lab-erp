@@ -8,7 +8,7 @@ import { emptyGritRow, emptyMaterialRow, type MaterialsInput } from "@/modules/f
 import type { MasterRef } from "@/modules/master-data/types";
 import { bodiesDesignText } from "./bodies";
 import type { LabFormInput } from "./schema";
-import { sampleInclude } from "./service";
+import { sampleInclude } from "./include";
 
 /*
  * Lab samples — the read model: the Review page, the form (edit), Recent

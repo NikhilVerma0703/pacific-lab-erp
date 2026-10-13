@@ -9,6 +9,7 @@ import { getDashboard } from "@/modules/dashboard/queries";
 import { Forum } from "@/modules/forum/components/Forum";
 import { POST_KIND_LABEL } from "@/modules/forum/kinds";
 import { listForumPosts } from "@/modules/forum/queries";
+import { ensureRecordStores } from "@/modules/records/sync";
 
 export const metadata = { title: "Dashboard" };
 export const dynamic = "force-dynamic";
@@ -24,6 +25,8 @@ function SectionTitle({ children, aside }: { children: React.ReactNode; aside?: 
 
 export default async function DashboardPage() {
   const user = await requireUser();
+  // Records saved before the Lab Sample / Inward-Outward databases existed get their copy (once per server start).
+  await ensureRecordStores();
   if (!can(user, "dashboard.view")) notFound();
   const [data, posts] = await Promise.all([getDashboard(), listForumPosts()]);
   const todayLabel = new Intl.DateTimeFormat("en-GB", {

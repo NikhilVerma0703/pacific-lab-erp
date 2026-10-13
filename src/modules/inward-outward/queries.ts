@@ -15,7 +15,7 @@ import {
 import { inwardDesignText } from "./design-text";
 import { DESIGN_TYPES, orderTypes, type DesignTypeKey } from "@/modules/forms/design-types";
 import { emptyVeinType, type InwardFormInput } from "./schema";
-import { inwardInclude } from "./service";
+import { inwardInclude } from "./include";
 
 /*
  * Inward / Outward — reading entries back. `InwardDetail` is also what

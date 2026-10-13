@@ -1,8 +1,8 @@
 import "server-only";
 import { prisma } from "@/lib/db";
-import { inwardInclude } from "@/modules/inward-outward/service";
+import { inwardInclude } from "@/modules/inward-outward/include";
 import { toInwardDetail, type InwardDetail } from "@/modules/inward-outward/queries";
-import { sampleInclude } from "@/modules/samples/service";
+import { sampleInclude } from "@/modules/samples/include";
 import { toDetail, type SampleDetail } from "@/modules/samples/queries";
 import { productionInclude } from "@/modules/production/service";
 import { toProductionDetail, type ProductionDetail } from "@/modules/production/queries";

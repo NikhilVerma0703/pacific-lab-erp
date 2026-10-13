@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { RotateCcw, Save, X } from "lucide-react";
+import { History, RotateCcw, Save, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { Controller, FormProvider, useForm, useFormContext, useWatch, type Resolver } from "react-hook-form";
@@ -17,13 +17,14 @@ import { Field } from "@/components/ui/Field";
 import { FormSection } from "@/components/ui/FormSection";
 import { MasterPicker } from "@/components/ui/MasterPicker";
 import { Segmented } from "@/components/ui/Segmented";
-import { cn } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 import type { DesignLayout } from "@/modules/forms/design";
 import { DESIGN_TYPES, type DesignTypeKey } from "@/modules/forms/design-types";
 import { MAX_BODIES } from "@/modules/forms/fields";
 import { MASTER } from "@/modules/master-data/catalog";
-import type { MasterOptions } from "@/modules/master-data/types";
-import { nextLabNumbersAction, saveLabSampleAction } from "../actions";
+import type { MasterOption, MasterOptions, MasterRef } from "@/modules/master-data/types";
+import { inwardDesignSuggestionsAction, nextLabNumbersAction, saveLabSampleAction } from "../actions";
+import { postPolishRows, type DesignSuggestion } from "../design-suggestion";
 import type { LabFormPermissions } from "../page-helpers";
 import type { AttachmentDTO } from "../queries";
 import { labFormSchema, labLayout, visibleLabInput, type LabFormData, type LabFormInput } from "../schema";
@@ -59,6 +60,7 @@ export function LabSampleForm({
   defaults,
   attachments: initialFiles,
   options,
+  designNameOptions,
   permissions,
   maxUploadMb,
 }: {
@@ -67,6 +69,8 @@ export function LabSampleForm({
   defaults: LabFormInput;
   attachments: AttachmentDTO[];
   options: MasterOptions;
+  /** Design Names saved in the Sample Inward / Outward Database. */
+  designNameOptions: MasterOption[];
   permissions: LabFormPermissions;
   maxUploadMb: number;
 }) {
@@ -78,7 +82,7 @@ export function LabSampleForm({
   const env: Env = { options, allowCustom: permissions.addMaster };
 
   const methods = useForm<LabFormInput, unknown, LabFormData>({ resolver, defaultValues: defaults, mode: "onBlur" });
-  const { control, register, handleSubmit, getValues, reset, setError, formState } = methods;
+  const { control, register, handleSubmit, getValues, setValue, reset, setError, formState } = methods;
   const errors = formState.errors;
 
   const watched = useWatch({ control, name: ["plainBody", "designTypes", "numberOfBodies", "royBody.count", "chessboard.count"] });
@@ -192,7 +196,7 @@ export function LabSampleForm({
                 render={({ field }) => (
                   <MasterPicker
                     id="lab-designName"
-                    options={options[MASTER.DESIGN_NAME]}
+                    options={designNameOptions}
                     value={field.value ?? null}
                     onChange={field.onChange}
                     allowCustom={permissions.addMaster}
@@ -204,6 +208,24 @@ export function LabSampleForm({
               />
             </Field>
           </div>
+          <InwardSuggestions
+            onUse={(sg) => {
+              const before = getValues();
+              const opts = { shouldDirty: true } as const;
+              setValue("plainBody", sg.plainBody === null ? "" : sg.plainBody ? "YES" : "NO", opts);
+              setValue("designTypes", sg.designTypes, opts);
+              setValue("numberOfBodies", sg.numberOfBodies ? String(sg.numberOfBodies) : "", opts);
+              if (sg.royCount) setValue("royBody.count", String(sg.royCount), opts);
+              if (sg.chessCount) setValue("chessboard.count", String(sg.chessCount), opts);
+              // Inward / Outward readings → Post Polish; Post Press stays empty.
+              setValue("readings", postPolishRows(sg.readings, sg.numberOfBodies), opts);
+              setValue("royReadings", postPolishRows(sg.royReadings, sg.royCount), opts);
+              setValue("chessboardReadings", postPolishRows(sg.chessboardReadings, sg.chessCount), opts);
+              toast.success(`Filled from Inward / Outward S.No. ${sg.source.serialNo} — ${sg.designName} – ${sg.design}. Check and edit as needed.`, {
+                action: { label: "Undo", onClick: () => reset(before, { keepDefaultValues: true }) },
+              });
+            }}
+          />
         </FormSection>
 
         {/* Design Type and Number of Bodies */}
@@ -469,4 +491,68 @@ function ReadingGroup({ title, hint, n, tone = "brand", children }: { title: str
 
 function Hint({ children }: { children: React.ReactNode }) {
   return <p className="rounded-lg border border-dashed border-line-2 bg-mute-bg/40 px-4 py-4 text-[14px] text-ink-2">{children}</p>;
+}
+
+/**
+ * Beside Design Name: the designs saved for that name in the Sample Inward /
+ * Outward Database ("A – Plain Body", "A – Roy Body + Carrara" …). Using one
+ * fills Design Type, Number of Bodies (N), n and the readings as Post Polish
+ * L, a, b — all still editable. Read-only for the inward records.
+ */
+function InwardSuggestions({ onUse }: { onUse: (s: DesignSuggestion) => void }) {
+  const { control } = useFormContext<LabFormInput>();
+  const name = useWatch({ control, name: "designName" }) as MasterRef | null | undefined;
+  const label = name?.label?.trim() ?? "";
+  const lookup = name?.id ?? label.toLowerCase();
+  const [state, setState] = useState<{ key: string; list: DesignSuggestion[] } | null>(null);
+
+  useEffect(() => {
+    if (!lookup) return;
+    let alive = true;
+    const t = setTimeout(async () => {
+      const list = await inwardDesignSuggestionsAction(name ? { id: name.id, label } : null);
+      if (alive) setState({ key: lookup, list });
+    }, 300);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lookup]);
+
+  if (!lookup || state?.key !== lookup) return null;
+  return (
+    <section aria-label="Existing physical samples" className="mt-4 rounded-lg border border-accent/40 bg-accent-bg/40 p-3 sm:p-4">
+      <h3 className="flex items-center gap-2 text-[13px] font-bold">
+        <History className="size-4 text-accent" aria-hidden="true" /> Existing physical samples — Sample Inward / Outward
+      </h3>
+      {state.list.length === 0 ? (
+        <p className="mt-1 text-[13px] text-ink-2">No Inward / Outward entry has this Design Name — fill in the form below.</p>
+      ) : (
+        <>
+          <p className="mt-0.5 text-[12px] text-ink-2">Use one to fill Design Type, Number of Bodies and the Post Polish L, a, b from that entry. Everything stays editable.</p>
+          <ul className="mt-2 grid gap-2 lg:grid-cols-2">
+            {state.list.map((sg) => (
+              <li key={sg.key} className="flex items-center gap-3 rounded-lg border border-line bg-white px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[14px] font-semibold">
+                    {sg.designName} – {sg.design}
+                  </p>
+                  <p className="text-[12px] text-ink-2">
+                    N = {sg.numberOfBodies ?? "—"}
+                    {sg.royCount ? ` · Roy Bodies ${sg.royCount}` : ""}
+                    {sg.chessCount ? ` · Chessboard Bodies ${sg.chessCount}` : ""} · S.No. {sg.source.serialNo} · {formatDate(sg.source.entryDate)}
+                    {sg.records > 1 ? ` (latest of ${sg.records})` : ""}
+                  </p>
+                </div>
+                <button type="button" className="btn-secondary btn-sm shrink-0" onClick={() => onUse(sg)} aria-label={`Use ${sg.designName} – ${sg.design}`}>
+                  Use
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
+  );
 }

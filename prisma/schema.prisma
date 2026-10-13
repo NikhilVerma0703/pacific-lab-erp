@@ -206,6 +206,8 @@ model LabSample {
   bodies         SampleBody[]
   /// Plain Body – No: the selected design types with their own fields.
   designDetails  SampleDesignDetail[]
+  /// Lab Sample Database: the complete copy of this sample.
+  record         LabSampleRecord?
 
   @@index([sampleDate])
   @@index([status])
@@ -597,6 +599,8 @@ model InwardOutwardEntry {
   bodies         InwardBody[]
   /// Plain Body – No: each selected design type and its own fields.
   designDetails  InwardDesignDetail[]
+  /// Sample Inward / Outward Database: the complete copy of this entry.
+  record         InwardOutwardRecord?
   /// Sample Output files.
   attachments    SampleAttachment[]
 
@@ -925,4 +929,64 @@ model AuditLog {
 
   @@index([entityType, entityId])
   @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Separate record databases (Lab Sample Database, Sample Inward / Outward
+// Database). Every saved record is also stored here as one complete,
+// self-contained copy — Basic / Sample Details, design (Plain Body, design
+// types and their fields), Material Details, all L, a, b readings, files and
+// remarks — rewritten on every save and removed when the record is deleted.
+// The registers keep reading the forms' own tables; these copies are for
+// using the records on their own (e.g. Lab Sample suggestions from existing
+// physical samples). Labels in `data` are as at the last save; every value
+// also carries its id.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model LabSampleRecord {
+  sampleId       String       @id
+  serialNo       Int
+  slabNumber     Int?
+  sampleDate     DateTime     @db.Date
+  designNameId   String?
+  designName     String?
+  plainBody      Boolean?
+  designTypes    DesignType[]
+  numberOfBodies Int?
+  /// Shape of `data` (bumped if the form changes).
+  formVersion    Int          @default(1)
+  /// The whole record (SampleDetail).
+  data           Json
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  sample LabSample @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+
+  @@index([sampleDate])
+  @@index([designNameId])
+}
+
+model InwardOutwardRecord {
+  entryId        String       @id
+  serialNo       Int
+  slabNumber     Int?
+  entryDate      DateTime     @db.Date
+  companyId      String?
+  company        String?
+  designNameId   String?
+  designName     String?
+  plainBody      Boolean?
+  designTypes    DesignType[]
+  numberOfBodies Int?
+  /// Shape of `data` (bumped if the form changes).
+  formVersion    Int          @default(1)
+  /// The whole record (InwardDetail).
+  data           Json
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  entry InwardOutwardEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@index([entryDate])
+  @@index([designNameId])
 }
