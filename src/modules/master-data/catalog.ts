@@ -38,9 +38,26 @@ export const VALUE_CODE = {
 /**
  * Lists the ERP no longer uses. Hidden from Master Data; the seed script
  * removes them once nothing refers to them. (Sample Types — Creative /
- * Inspired — were retired when Sample Type was removed from Sample Data Entry.)
+ * Inspired — went with Sample Type; Vein Introduction Methods were used only
+ * by the earlier forms, whose saved records keep showing them.)
  */
-export const RETIRED_CATEGORY_CODES = ["SAMPLE_TYPE"] as const;
+export const RETIRED_CATEGORY_CODES = ["SAMPLE_TYPE", "VEIN_METHOD"] as const;
+
+/**
+ * Lists not shown in Master Data: the retired ones, and Vein Details — the
+ * Kreos / Vein "Vein Details" field still offers what was typed before, but
+ * the list itself is no longer managed in Master Data.
+ */
+export const HIDDEN_CATEGORY_CODES: readonly string[] = [...RETIRED_CATEGORY_CODES, MASTER.VEIN_DETAIL];
+
+/**
+ * Material lists with no predefined values: Resin, Grits, Grit Sizes, Filler,
+ * Pigments / Colours (Color Used, and the colours of Kreos / Carrara / Vein)
+ * and Additives start empty and hold only what people type in the forms — each
+ * field into its own list. Values an earlier version seeded are removed
+ * (deleted when unused, else hidden) by `retirePredefinedValues`.
+ */
+export const TYPED_ONLY_CODES: readonly MasterCode[] = [MASTER.RESIN, MASTER.GRIT, MASTER.GRIT_SIZE, MASTER.FILLER, MASTER.PIGMENT, MASTER.ADDITIVE];
 
 export interface CatalogEntry {
   code: MasterCode;
@@ -56,51 +73,51 @@ export interface CatalogEntry {
 /** Where a list sits in Master Data. */
 export const catalogSortOrder = (entry: CatalogEntry, index: number) => entry.sortOrder ?? (index + 1) * 10;
 
-// Resins, Grits, Grit Sizes and Fillers start empty: the Lab Sample form lets
-// people type them, and each new value becomes an option for later entries.
+// The material lists (TYPED_ONLY_CODES) start empty: the forms let people type
+// them, and each new value becomes an option of that field for later entries.
 export const CATALOG: CatalogEntry[] = [
   {
     code: MASTER.RESIN,
     name: "Resins",
-    description: "Resin suppliers / grades used in formulations.",
+    description: "Resins typed in the forms. Starts empty; grows with use.",
     values: [],
   },
   {
     code: MASTER.GRIT,
     name: "Grits",
-    description: "Grit materials.",
+    description: "Grits typed in the forms. Starts empty; grows with use.",
     values: [],
   },
   {
     code: MASTER.GRIT_SIZE,
     name: "Grit Sizes",
-    description: "Particle size ranges for grits.",
+    description: "Sizes of grit typed in the forms. Starts empty; grows with use.",
     values: [],
   },
   {
     code: MASTER.FILLER,
     name: "Fillers",
-    description: "Filler materials.",
+    description: "Fillers typed in the forms. Starts empty; grows with use.",
     values: [],
   },
   {
     code: MASTER.PIGMENT,
     name: "Pigments / Colours",
-    description: "Every colour used in a sample. Grows with use.",
-    values: [{ label: "White" }, { label: "Grey" }, { label: "Black" }],
+    description: "Every colour typed in the forms (Color Used, Kreos / Carrara / Vein colours). Starts empty; grows with use.",
+    values: [],
   },
   {
     code: MASTER.ADDITIVE,
     name: "Additives",
-    description: "Additives used in formulations (Lab Sample form). Grows with use.",
+    description: "Additives typed in the Lab Sample form. Starts empty; grows with use.",
     values: [],
     // Right after Pigments / Colours, also on installs that already have the other lists.
     sortOrder: 55,
   },
   {
     code: MASTER.DESIGN_PATTERN,
-    name: "Design Patterns",
-    description: "Non-plain body design patterns. ROY BODY opens the Roy Body formulation.",
+    name: "Design Types",
+    description: "Design types of Plain Body – No (Roy Body, Kreos, Carrara, Vein, Chessboard), and design patterns recorded by the earlier forms.",
     values: [
       { label: "CARRARA", code: VALUE_CODE.CARRARA },
       { label: "VEIN", code: VALUE_CODE.VEIN },
@@ -114,7 +131,7 @@ export const CATALOG: CatalogEntry[] = [
     name: "Design Names",
     description: "Design names used in Sample Data Entry, Production Sample and Inward / Outward. Grows with use.",
     values: [],
-    // Right after Design Patterns, also on installs that already have the other lists.
+    // Right after Design Types, also on installs that already have the other lists.
     sortOrder: 65,
   },
   {
@@ -124,22 +141,11 @@ export const CATALOG: CatalogEntry[] = [
     values: [{ label: "GRIT" }, { label: "FILLER" }, { label: "PURE" }],
   },
   {
-    code: MASTER.VEIN_METHOD,
-    name: "Vein Introduction Methods",
-    description: "How the vein was introduced. ROY BODY opens the Roy Body formulation.",
-    values: [
-      { label: "CARRARA" },
-      { label: "KREOS" },
-      { label: "ROY BODY", code: VALUE_CODE.ROY_BODY },
-      { label: "VEIN" },
-    ],
-  },
-  {
     code: MASTER.VEIN_DETAIL,
     name: "Vein Details",
-    description: "Vein details (colour, thickness, direction …) — picked like Color Used. Grows with use.",
+    description: "Vein details typed in the Kreos / Vein sections. Not shown in Master Data; grows with use.",
     values: [],
-    // Right after Vein Introduction Methods, also on installs that already have the other lists.
+    // Near Mixer Types, also on installs that already have the other lists.
     sortOrder: 95,
     // Details are short phrases rather than one-word names.
     maxLabel: 200,

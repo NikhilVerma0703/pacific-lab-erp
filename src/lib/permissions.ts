@@ -42,6 +42,8 @@ const PERMISSIONS = {
   "production.changeDate": ["ADMIN", "MANAGER", "OPERATOR"],
   // Dashboard & Forum
   "dashboard.view": ["ADMIN", "MANAGER", "OPERATOR", "VIEWER"],
+  /** Open the Forum section and read its posts. */
+  "forum.view": ["ADMIN", "MANAGER", "OPERATOR", "VIEWER"],
   /** Start a Forum post — Lab Head / Plant Head / CEO (Manager or Admin). */
   "forum.post": ["ADMIN", "MANAGER"],
   /** Reply in a post's thread — Lab and R&D users too. */

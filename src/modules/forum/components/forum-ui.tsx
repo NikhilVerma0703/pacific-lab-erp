@@ -2,7 +2,6 @@
 
 import { sameText } from "@/lib/normalize";
 import { ChevronDown } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { POST_KIND_LABEL, POST_STATUS_LABEL, POST_STATUS_VALUES, type PostKind, type PostStatus } from "../kinds";
 
@@ -101,32 +100,3 @@ export function Avatar({ name, tone = "brand", size = "md" }: { name: string; to
 
 /** Same person's name, ignoring case and spaces. */
 export const sameName = (a: string, b: string) => sameText(a, b);
-
-const NAME_KEY = "lab-erp:forum-name";
-
-/**
- * The name typed by whoever is posting or replying, remembered on this
- * computer (sign-in is off, so the ERP can't know who is at the screen).
- */
-export function useForumName() {
-  const [name, setName] = useState("");
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(NAME_KEY);
-      if (saved) setName(saved);
-    } catch {
-      /* storage blocked — the name just isn't remembered */
-    }
-  }, []);
-  const remember = useCallback((next: string) => {
-    const v = next.trim();
-    setName(v);
-    try {
-      if (v) window.localStorage.setItem(NAME_KEY, v);
-      else window.localStorage.removeItem(NAME_KEY);
-    } catch {
-      /* ignore */
-    }
-  }, []);
-  return [name, remember] as const;
-}

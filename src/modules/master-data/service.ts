@@ -3,7 +3,8 @@ import { Prisma } from "@prisma/client";
 import { prisma, type Tx } from "@/lib/db";
 import { cleanLabel, compareLabels, normalizeKey } from "@/lib/normalize";
 import { backfillTypedValues } from "./backfill";
-import { CATALOG, catalogSortOrder, labelLimit, MASTER, RETIRED_CATEGORY_CODES, type MasterCode } from "./catalog";
+import { CATALOG, catalogSortOrder, HIDDEN_CATEGORY_CODES, labelLimit, MASTER, TYPED_ONLY_CODES, type MasterCode } from "./catalog";
+import { retirePredefinedValues, syncCatalogText } from "./retire";
 import type { MasterOption, MasterOptions, MasterRef } from "./types";
 
 /** Category ids by code, cached per process (categories rarely change). */
@@ -58,12 +59,35 @@ async function ensureCatalogCategories(db: typeof prisma = prisma): Promise<bool
   return created;
 }
 
+let maintained: Promise<void> | null = null;
+
+/**
+ * Once per server process: list names / descriptions from the catalog, and the
+ * material lists' predefined values removed (see `retire.ts`). `npm run db:seed`
+ * does the same.
+ */
+function maintainCatalog(): Promise<void> {
+  maintained ??= (async () => {
+    try {
+      for (const line of [...(await syncCatalogText(prisma)), ...(await retirePredefinedValues(prisma))]) console.log(line);
+    } catch (e) {
+      maintained = null;
+      console.error("master-data maintenance", e);
+    }
+  })();
+  return maintained;
+}
+
+/** Predefined material values hidden because records still use them — not shown in Master Data. */
+const retiredPredefined: Prisma.MasterValueWhereInput = { isSystem: true, isActive: false, category: { code: { in: [...TYPED_ONLY_CODES] } } };
+
 /**
  * Every list a data-entry form needs. Active values, plus — when editing — any
  * disabled value the sample already uses, so old records still display.
  */
 export async function getMasterOptions(includeIds: string[] = []): Promise<MasterOptions> {
   if (!catalogChecked) await ensureCatalogCategories();
+  await maintainCatalog();
   const rows = await prisma.masterValue.findMany({
     where: { OR: [{ isActive: true }, { id: { in: includeIds } }], category: { isActive: true } },
     select: { id: true, label: true, code: true, isActive: true, sortOrder: true, category: { select: { code: true } } },
@@ -118,7 +142,8 @@ export async function resolveMasterRef(
   });
   if (existing) {
     if (save && !existing.isActive) {
-      await tx.masterValue.update({ where: { id: existing.id }, data: { isActive: true } });
+      // A hidden predefined material value typed again becomes the user's own value.
+      await tx.masterValue.update({ where: { id: existing.id }, data: { isActive: true, ...(TYPED_ONLY_CODES.includes(code) ? { isSystem: false } : {}) } });
     }
     return existing.id;
   }
@@ -147,23 +172,23 @@ export function listName(code: MasterCode): string {
 /** Category list with value counts — for the Master Data screen. */
 export async function listCategories() {
   await ensureCatalogCategories();
+  await maintainCatalog();
   const cats = await prisma.masterCategory.findMany({
-    where: { code: { notIn: [...RETIRED_CATEGORY_CODES] } },
+    where: { code: { notIn: [...HIDDEN_CATEGORY_CODES] } },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-    include: { _count: { select: { values: true } } },
   });
-  const active = await prisma.masterValue.groupBy({
-    by: ["categoryId"],
-    where: { isActive: true },
-    _count: { _all: true },
-  });
+  const [all, active] = await Promise.all([
+    prisma.masterValue.groupBy({ by: ["categoryId"], where: { NOT: retiredPredefined }, _count: { _all: true } }),
+    prisma.masterValue.groupBy({ by: ["categoryId"], where: { isActive: true }, _count: { _all: true } }),
+  ]);
+  const totalBy = new Map(all.map((a) => [a.categoryId, a._count._all]));
   const activeBy = new Map(active.map((a) => [a.categoryId, a._count._all]));
   return cats.map((c) => ({
     id: c.id,
     code: c.code,
     name: c.name,
     description: c.description,
-    total: c._count.values,
+    total: totalBy.get(c.id) ?? 0,
     active: activeBy.get(c.id) ?? 0,
   }));
 }
@@ -171,9 +196,9 @@ export async function listCategories() {
 /** Values in one category with how many samples use each. */
 export async function listValues(categoryCode: string) {
   const cat = await prisma.masterCategory.findUnique({ where: { code: categoryCode } });
-  if (!cat) return null;
+  if (!cat || HIDDEN_CATEGORY_CODES.includes(cat.code)) return null;
   const values = await prisma.masterValue.findMany({
-    where: { categoryId: cat.id },
+    where: { categoryId: cat.id, NOT: retiredPredefined },
     orderBy: [{ isActive: "desc" }, { sortOrder: "asc" }, { label: "asc" }],
     include: {
       createdBy: { select: { name: true } },

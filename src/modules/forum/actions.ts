@@ -7,7 +7,7 @@ import { audit } from "@/lib/audit";
 import { fail, type ActionResult } from "@/lib/action-result";
 import { PermissionError, requirePermission } from "@/lib/session";
 import { POST_STATUS_LABEL } from "./kinds";
-import { postSchema, replySchema, statusSchema, type PostInput, type ReplyInput } from "./schema";
+import { postHeading, postSchema, replySchema, statusSchema, type PostInput, type ReplyInput } from "./schema";
 
 /**
  * Forum actions. Posts come from the Lab Head / Plant Head / CEO ("forum.post");
@@ -15,7 +15,7 @@ import { postSchema, replySchema, statusSchema, type PostInput, type ReplyInput 
  * post is archived and a removed reply is hidden, so the record stays.
  */
 
-const PATH = "/dashboard";
+const PATH = "/forum";
 
 function fieldErrors(e: z.ZodError) {
   const out: Record<string, string> = {};
@@ -39,11 +39,11 @@ export async function saveForumPostAction(input: PostInput, id?: string): Promis
         if (!cur || cur.isArchived) throw new NotFound();
         if (cur.createdById !== user.id && user.role !== "ADMIN") throw new PermissionError("forum.post");
         const p = await tx.announcement.update({ where: { id }, data });
-        await audit(tx, { entityType: "ForumPost", entityId: p.id, action: "UPDATE", summary: p.title, userId: user.id });
+        await audit(tx, { entityType: "ForumPost", entityId: p.id, action: "UPDATE", summary: postHeading(p), userId: user.id });
         return p;
       }
       const p = await tx.announcement.create({ data: { ...data, createdById: user.id } });
-      await audit(tx, { entityType: "ForumPost", entityId: p.id, action: "CREATE", summary: p.title, userId: user.id });
+      await audit(tx, { entityType: "ForumPost", entityId: p.id, action: "CREATE", summary: postHeading(p), userId: user.id });
       return p;
     });
     revalidatePath(PATH);
@@ -65,7 +65,7 @@ export async function archiveForumPostAction(id: string): Promise<ActionResult> 
     if (cur.createdById !== user.id && user.role !== "ADMIN") return fail("You can only remove posts you created.");
     await prisma.$transaction(async (tx) => {
       await tx.announcement.update({ where: { id }, data: { isArchived: true } });
-      await audit(tx, { entityType: "ForumPost", entityId: id, action: "ARCHIVE", summary: cur.title, userId: user.id });
+      await audit(tx, { entityType: "ForumPost", entityId: id, action: "ARCHIVE", summary: postHeading(cur), userId: user.id });
     });
     revalidatePath(PATH);
     return { ok: true, data: undefined, message: "Post removed from the Forum." };
@@ -91,7 +91,7 @@ export async function setForumPostStatusAction(id: string, status: string): Prom
         entityType: "ForumPost",
         entityId: id,
         action: "STATUS",
-        summary: `${cur.title}: ${POST_STATUS_LABEL[cur.status]} → ${POST_STATUS_LABEL[parsed.data]}`,
+        summary: `${postHeading(cur)}: ${POST_STATUS_LABEL[cur.status]} → ${POST_STATUS_LABEL[parsed.data]}`,
         userId: user.id,
       });
     });
@@ -112,13 +112,13 @@ export async function addForumReplyAction(postId: string, input: ReplyInput): Pr
     if (!parsed.success) return fail("Please complete the highlighted fields.", fieldErrors(parsed.error));
 
     const reply = await prisma.$transaction(async (tx) => {
-      const post = await tx.announcement.findUnique({ where: { id: postId }, select: { id: true, title: true, isArchived: true } });
+      const post = await tx.announcement.findUnique({ where: { id: postId }, select: { id: true, title: true, message: true, isArchived: true } });
       if (!post || post.isArchived) throw new NotFound();
       const r = await tx.forumReply.create({
         data: { postId, message: parsed.data.message, authorName: parsed.data.authorName, createdById: user.id },
       });
       await tx.announcement.update({ where: { id: postId }, data: { lastActivityAt: r.createdAt } });
-      await audit(tx, { entityType: "ForumReply", entityId: r.id, action: "CREATE", summary: `Reply on “${post.title}”`, userId: user.id });
+      await audit(tx, { entityType: "ForumReply", entityId: r.id, action: "CREATE", summary: `Reply on “${postHeading(post)}”`, userId: user.id });
       return r;
     });
     revalidatePath(PATH);

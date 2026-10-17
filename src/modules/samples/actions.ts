@@ -21,7 +21,7 @@ async function removeFiles(keys: string[]) {
 
 export async function saveLabSampleAction(
   input: LabFormInput,
-  opts: { id?: string; autoSerial?: boolean; autoSlab?: boolean },
+  opts: { id?: string; autoSlab?: boolean },
 ): Promise<ActionResult<{ id: string; serialNo: number; slabNumber: number | null }>> {
   try {
     const user = await requirePermission(opts.id ? "sample.edit" : "sample.create");
@@ -30,7 +30,7 @@ export async function saveLabSampleAction(
     const parsed = labFormSchema.safeParse(visibleLabInput(input));
     if (!parsed.success) return fail("Some values are not valid — see the highlighted fields.", fieldErrorsOf(parsed.error.issues));
 
-    const r = await saveLabSample({ id: opts.id, data: parsed.data, user, autoSerial: !!opts.autoSerial, autoSlab: !!opts.autoSlab });
+    const r = await saveLabSample({ id: opts.id, data: parsed.data, user, autoSlab: !!opts.autoSlab });
     await removeFiles(r.removedKeys);
     revalidatePath(PATH);
     revalidatePath("/dashboard");
@@ -67,10 +67,10 @@ export async function deleteLabSampleAction(id: string): Promise<ActionResult> {
   }
 }
 
-/** Fresh S.No. / Slab suggestions after a save, without reloading the page. */
-export async function nextLabNumbersAction() {
-  await requirePermission("sample.create");
-  return suggestLabNumbers();
+/** S.No. and starting Slab Number for a date (the form asks when its Date changes, and after a save). */
+export async function nextLabNumbersAction(date?: string, excludeId?: string) {
+  await requirePermission(excludeId ? "sample.edit" : "sample.create");
+  return suggestLabNumbers(date, excludeId);
 }
 
 /**

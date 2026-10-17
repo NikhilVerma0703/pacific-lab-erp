@@ -2,7 +2,7 @@
 
 Laboratory / R&D sub-ERP: lab samples, their formulations, design, vein, L/a/b readings and output files, with the master lists that feed every dropdown.
 
-**Live sections:** Dashboard (with the Forum), Sample Data Entry (rebuilt Lab Sample form + Recent Entries), Sample Inward / Outward (rebuilt form + register + Rectification), Production Sample (rebuilt form + register), Reports, Downloads and Master Data. The three forms were rebuilt in October 2026 (see `docs/ARCHITECTURE.md` → "Forms rebuild").
+**Live sections:** Dashboard, Forum, Sample Data Entry (rebuilt Lab Sample form + Recent Entries), Sample Inward / Outward (rebuilt form + register), Production Sample (rebuilt form + register), Reports, Downloads and Master Data. The three forms were rebuilt in October 2026 (see `docs/ARCHITECTURE.md` → "Forms rebuild").
 
 > **Updating an existing install:** after copying new code, run `npm install` and `npm run db:push` (applies new tables/columns), then `npm run db:seed` (adds any new master lists, removes retired ones). Existing data is kept.
 >

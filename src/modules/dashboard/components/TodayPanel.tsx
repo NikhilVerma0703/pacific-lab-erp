@@ -19,7 +19,7 @@ export function TodayPanel({ data }: { data: DashboardData["todayStats"] }) {
         <p className="mt-2 text-5xl font-bold tracking-tight tabular-nums">{data.total}</p>
         <div className="mt-4 grid grid-cols-2 gap-2">
           <Split label="Lab" value={data.lab} />
-          <Split label="Line" value={data.line} hint="Not recorded yet" />
+          <Split label="Line" value={data.line} hint="Production Samples" />
         </div>
       </div>
 

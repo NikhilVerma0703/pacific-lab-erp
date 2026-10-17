@@ -118,7 +118,7 @@ export function SampleDetailView({ s }: { s: SampleDetail }) {
           <div className="space-y-4">
             <Pairs
               items={[
-                ["Physical Sample Available?", s.physicalSamplePresent === null ? null : s.physicalSamplePresent ? "Yes" : "No (Rectification)"],
+                ["Physical Sample Available?", s.physicalSamplePresent === null ? null : s.physicalSamplePresent ? "Yes" : "No"],
                 [
                   "Inward / Outward",
                   s.inwardEntry ? (

@@ -213,3 +213,13 @@ describe("Sample Inward / Outward form — only what is shown is validated and s
     expect(v.bodies).toEqual([]);
   });
 });
+
+describe("design type labels (Reports)", () => {
+  it("Plain Body, each selected type, or Non-Plain without a type", async () => {
+    const { designTypeLabels } = await import("@/modules/forms/design-types");
+    expect(designTypeLabels(true, ["ROY_BODY"])).toEqual(["Plain Body"]);
+    expect(designTypeLabels(false, ["CARRARA", "ROY_BODY"])).toEqual(["Roy Body", "Carrara"]);
+    expect(designTypeLabels(false, [])).toEqual(["Non-Plain (no type)"]);
+    expect(designTypeLabels(null, ["VEIN"])).toEqual([]);
+  });
+});

@@ -16,16 +16,16 @@ export interface DashboardData {
   overall: {
     totalSamples: number;
     lab: number;
+    /** Line Samples = Production Samples. */
     line: number;
     designs: number;
-    production: number;
   };
 }
 
 
 /**
- * Line samples are not recorded yet, so Line is 0 and every lab sample counts
- * as a Lab sample. Production samples come from the Production Sample register.
+ * Lab Samples come from the Lab Sample form; Line Samples are the Production
+ * Samples (the Production Sample form). Total Samples = Lab + Line.
  */
 export async function getDashboard(): Promise<DashboardData> {
   const today = plantToday();
@@ -41,7 +41,8 @@ export async function getDashboard(): Promise<DashboardData> {
     usedDesignNames,
     inwardNames,
     sampleNames,
-    production,
+    productionTotal,
+    productionToday,
   ] = await Promise.all([
     // Today: only the Design Name of each lab sample and the Sample Design Name of each Inward / Outward entry.
     prisma.labSample.findMany({
@@ -87,6 +88,7 @@ export async function getDashboard(): Promise<DashboardData> {
       select: { legacyDesignName: true },
     }),
     prisma.productionSample.count(),
+    prisma.productionSample.count({ where: { sampleDate: day } }),
   ]);
 
   // Designs Worked On Today = the Design Names recorded today, each once (ignoring case);
@@ -109,17 +111,16 @@ export async function getDashboard(): Promise<DashboardData> {
   return {
     today,
     todayStats: {
-      total: lab + 0,
+      total: lab + productionToday,
       lab,
-      line: 0,
+      line: productionToday,
       designs: todayDesigns,
     },
     overall: {
-      totalSamples: totalSamples + 0,
+      totalSamples: totalSamples + productionTotal,
       lab: totalSamples,
-      line: 0,
+      line: productionTotal,
       designs: allDesigns.length,
-      production,
     },
   };
 }

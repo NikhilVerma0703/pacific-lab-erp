@@ -48,11 +48,11 @@ export function visibleProductionInput(input: ProductionFormInput): ProductionFo
 }
 
 /** A blank form with the suggested numbers and today's date. */
-export function newProductionInput(args: { serialNo: number; slabNumber: number; today: string }): ProductionFormInput {
+export function newProductionInput(args: { serialNo: number; slabNumber: number | null; today: string }): ProductionFormInput {
   return {
     sampleDate: args.today,
     serialNo: String(args.serialNo),
-    slabNumber: String(args.slabNumber),
+    slabNumber: args.slabNumber === null ? "" : String(args.slabNumber),
     designName: null,
     numberOfBodies: "",
     bodies: [],

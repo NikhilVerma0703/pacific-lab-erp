@@ -22,12 +22,11 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   if (!can(user, "reports.view")) notFound();
   const days = parseRange((await searchParams).range);
   const data = await getReport(days);
-  const activeDays = data.production.filter((d) => d.count > 0).length;
-
+  // All three follow the selected date range.
   const kpis = [
-    { label: "Samples created", value: data.totals.samples },
-    { label: "Days with samples", value: `${activeDays} / ${days}` },
-    { label: "Production samples", value: data.totals.productionSamples },
+    { label: "Total Lab Samples", value: data.totals.samples },
+    { label: "Total Inward / Outward Samples", value: data.totals.inwardSamples },
+    { label: "Total Production Samples", value: data.totals.productionSamples },
   ];
 
   return (

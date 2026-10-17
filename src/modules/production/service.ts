@@ -5,10 +5,11 @@ import { audit } from "@/lib/audit";
 import { can } from "@/lib/permissions";
 import { plantToday } from "@/lib/plant-time";
 import type { CurrentUser } from "@/lib/session";
+import { allocateNumbers, dateOnly } from "@/modules/forms/date-numbering";
 import { readingIsEmpty } from "@/modules/forms/fields";
 import { MASTER } from "@/modules/master-data/catalog";
 import { MasterValueError, resolveMasterRef } from "@/modules/master-data/service";
-import { lockProductionNumbering, nextProductionSerial, nextProductionSlab } from "./numbering";
+import { lockProductionNumbering, productionNumbering, renumberProductionDate } from "./numbering";
 import type { ProductionFormData } from "./schema";
 
 export class ProductionSaveError extends Error {
@@ -20,7 +21,6 @@ export class ProductionSaveError extends Error {
   }
 }
 
-const dateOnly = (s: string) => new Date(`${s}T00:00:00.000Z`);
 
 /**
  * Create or update a production sample in one transaction:
@@ -36,11 +36,10 @@ export async function saveProductionSample(args: {
   id?: string;
   data: ProductionFormData;
   user: CurrentUser;
-  /** Create only: allocate S.No. / Slab even if the form carried a value (an untouched suggestion). */
-  autoSerial?: boolean;
+  /** Create only: the form still shows the suggested Slab Number (allocate it again at save). */
   autoSlab?: boolean;
 }): Promise<{ id: string; serialNo: number; slabNumber: number | null; removedKeys: string[] }> {
-  const { id, data, user, autoSerial, autoSlab } = args;
+  const { id, data, user, autoSlab } = args;
   const canOverride = can(user, "production.overrideNumbers");
   const canDate = can(user, "production.changeDate");
   const canAddMaster = can(user, "master.addFromForm");
@@ -59,35 +58,22 @@ export async function saveProductionSample(args: {
           : null;
         if (id && !existing) throw new ProductionSaveError("This entry no longer exists — it may have been deleted.");
 
-        // ── numbers ──────────────────────────────────────────────────────────
-        let serialNo: number;
-        let slabNumber: number | null;
-        if (existing) {
-          serialNo = canOverride && data.serialNo !== null ? data.serialNo : existing.serialNo;
-          slabNumber = canOverride ? data.slabNumber : existing.slabNumber;
-        } else {
-          serialNo = canOverride && !autoSerial && data.serialNo !== null ? data.serialNo : await nextProductionSerial(tx);
-          slabNumber = canOverride && !autoSlab ? data.slabNumber : await nextProductionSlab(tx);
-        }
-        const fieldErrors: Record<string, string> = {};
-        const notMe = existing ? { NOT: { id: existing.id } } : {};
-        if (await tx.productionSample.findFirst({ where: { serialNo, ...notMe }, select: { id: true } })) {
-          fieldErrors.serialNo = `S.No. ${serialNo} is already used by another production sample.`;
-        }
-        if (slabNumber !== null) {
-          const clash = await tx.productionSample.findFirst({ where: { slabNumber, ...notMe }, select: { serialNo: true } });
-          if (clash) fieldErrors.slabNumber = `Slab ${slabNumber} is already used by S.No. ${clash.serialNo}.`;
-        }
-        if (Object.keys(fieldErrors).length) {
-          throw new ProductionSaveError("Duplicate number — see the highlighted fields.", fieldErrors);
-        }
-
-        // ── date ─────────────────────────────────────────────────────────────
+        // ── date and numbers (S.No. 1, 2, 3 … within the date) ──────────────
         const sampleDate = canDate
-          ? dateOnly(data.sampleDate ?? plantToday())
+          ? dateOnly(data.sampleDate ?? (existing ? existing.sampleDate.toISOString().slice(0, 10) : plantToday()))
           : existing
             ? existing.sampleDate
             : dateOnly(plantToday());
+        const { serialNo, slabNumber, moved, fieldErrors } = await allocateNumbers(productionNumbering, tx, {
+          date: sampleDate,
+          existing: existing && { id: existing.id, date: existing.sampleDate, serialNo: existing.serialNo, slabNumber: existing.slabNumber },
+          typedSlab: data.slabNumber,
+          autoSlab: !!autoSlab,
+          canOverride,
+        });
+        if (Object.keys(fieldErrors).length) {
+          throw new ProductionSaveError("Duplicate number — see the highlighted fields.", fieldErrors);
+        }
 
         // ── Design Name (Design Names list) ──────────────────────────────────
         if (data.designName && !data.designName.id && data.designName.label.trim() && !canAddMaster) {
@@ -153,6 +139,9 @@ export async function saveProductionSample(args: {
           await tx.sampleAttachment.deleteMany({ where: { id: { in: toRemove.map((a) => a.id) } } });
         }
 
+        // Moved to another date: close the gap it left there.
+        if (moved) await renumberProductionDate(tx, existing!.sampleDate);
+
         await audit(tx, {
           entityType: "ProductionSample",
           entityId: sample.id,
@@ -190,7 +179,9 @@ export async function deleteProductionSample(id: string, user: CurrentUser): Pro
       snapshot: JSON.parse(JSON.stringify(snapshot)) as Prisma.InputJsonValue,
       userId: user.id,
     });
+    await lockProductionNumbering(tx);
     await tx.productionSample.delete({ where: { id } }); // patterns, readings and files cascade
+    await renumberProductionDate(tx, snapshot.sampleDate); // S.No. of that date stay 1 … k
     return { serialNo: snapshot.serialNo, removedKeys: snapshot.attachments.map((a) => a.storageKey) };
   });
 }

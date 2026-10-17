@@ -7,8 +7,9 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import bcrypt from "bcryptjs";
-import { CATALOG, catalogSortOrder, RETIRED_CATEGORY_CODES } from "../src/modules/master-data/catalog";
+import { CATALOG, catalogSortOrder } from "../src/modules/master-data/catalog";
 import { backfillTypedValues } from "../src/modules/master-data/backfill";
+import { removeRetiredLists, retirePredefinedValues, syncCatalogText } from "../src/modules/master-data/retire";
 import { cleanLabel, normalizeKey } from "../src/lib/normalize";
 
 const prisma = new PrismaClient({
@@ -53,20 +54,12 @@ async function main() {
     }
   }
 
-  // Lists the ERP no longer uses (e.g. Sample Types): removed once nothing refers to them.
-  for (const code of RETIRED_CATEGORY_CODES) {
-    const cat = await prisma.masterCategory.findUnique({ where: { code } });
-    if (!cat) continue;
-    try {
-      await prisma.$transaction([
-        prisma.masterValue.deleteMany({ where: { categoryId: cat.id } }),
-        prisma.masterCategory.delete({ where: { id: cat.id } }),
-      ]);
-      console.log(`Removed retired list ${code}.`);
-    } catch {
-      console.log(`Retired list ${code} is still referenced — run "npx prisma db push" first; it stays hidden meanwhile.`);
-    }
-  }
+  // List names / descriptions from the catalog (e.g. Design Patterns → Design Types).
+  for (const line of await syncCatalogText(prisma)) console.log(line);
+  // Lists the ERP no longer uses (Sample Types, Vein Introduction Methods): removed once nothing refers to them.
+  for (const line of await removeRetiredLists(prisma)) console.log(line);
+  // Material lists start empty: predefined values removed (or hidden while records use them).
+  for (const line of await retirePredefinedValues(prisma)) console.log(line);
 
   // Values typed before their list existed (Design Name, Vein details) → the lists.
   for (const line of await backfillTypedValues(prisma)) console.log(line);

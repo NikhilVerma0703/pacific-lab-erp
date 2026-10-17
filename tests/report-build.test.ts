@@ -23,18 +23,24 @@ describe("report window", () => {
 
 describe("buildReport", () => {
   const rows = [
-    s({ date: "2026-10-05", designs: ["CARRARA", "ROY BODY"],
+    s({ date: "2026-10-05", designs: ["Carrara", "Roy Body"],
         components: [
           { kind: "RESIN", material: "INEOS", unit: "GRAMS", quantity: 1200 },
           { kind: "RESIN", material: "ABC", unit: "PERCENT", quantity: 30 },
           { kind: "PIGMENT", material: "White", unit: "GRAMS", quantity: 12 },
+          { kind: "ADDITIVE", material: "UV Stabiliser", unit: "GRAMS", quantity: 2.5 },
         ] }),
     s({ date: "2026-10-05", designs: ["Plain Body"] }),
-    s({ date: "2026-10-03", designs: ["CARRARA"],
+    s({ date: "2026-10-03", designs: ["Carrara"],
         components: [{ kind: "RESIN", material: "INEOS", unit: "GRAMS", quantity: 300 }] }),
     s({ date: "2026-09-01", components: [{ kind: "RESIN", material: "INEOS", unit: "GRAMS", quantity: 9999 }] }), // outside
   ];
-  const r = buildReport(rows, "2026-10-05", 7);
+  const inward = [
+    { date: "2026-10-04", designs: ["Roy Body", "Kreos"] },
+    { date: "2026-10-05", designs: [] },
+    { date: "2026-08-01", designs: ["Vein"] }, // outside
+  ];
+  const r = buildReport(rows, "2026-10-05", 7, [], inward);
 
   it("counts samples per date inside the window only", () => {
     expect(r.totals.samples).toBe(3);
@@ -45,15 +51,23 @@ describe("buildReport", () => {
 
   it("has no Sample Type (Creative / Inspired) split any more", () => {
     expect(r).not.toHaveProperty("creativeVsInspired");
-    expect(Object.keys(r.totals).sort()).toEqual(["productionSamples", "samples", "withoutDesign"]);
+    expect(Object.keys(r.totals).sort()).toEqual(["inwardSamples", "productionSamples", "samples", "withoutDesign"]);
+    expect(r.totals.inwardSamples).toBe(2);
+    expect(r.totals.withoutDesign).toBe(1);
   });
 
-  it("ranks design patterns, Plain Body included", () => {
+  it("Design Type Analysis: lab + inward records per design type over the period, each type counted, highest first", () => {
     expect(r.designs).toEqual([
-      { pattern: "CARRARA", count: 2 },
+      { pattern: "Carrara", count: 2 },
+      { pattern: "Roy Body", count: 2 },
+      { pattern: "Kreos", count: 1 },
       { pattern: "Plain Body", count: 1 },
-      { pattern: "ROY BODY", count: 1 },
     ]);
+  });
+
+  it("adds Additives to Material Consumption", () => {
+    expect(r.consumption.ADDITIVE.totalGrams).toBe(2.5);
+    expect(r.consumption.ADDITIVE.byMaterial).toEqual([{ material: "UV Stabiliser", grams: 2.5 }]);
   });
 
   it("sums grams per material and keeps % out of the weight", () => {

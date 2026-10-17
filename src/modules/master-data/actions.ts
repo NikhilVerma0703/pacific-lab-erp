@@ -8,7 +8,7 @@ import { audit } from "@/lib/audit";
 import { fail, type ActionResult } from "@/lib/action-result";
 import { cleanLabel, compareLabels, normalizeKey } from "@/lib/normalize";
 import { PermissionError, requirePermission } from "@/lib/session";
-import { labelLimit } from "./catalog";
+import { labelLimit, TYPED_ONLY_CODES, type MasterCode } from "./catalog";
 
 const labelSchema = z.string().transform(cleanLabel).pipe(z.string().min(1, "Enter a value."));
 
@@ -47,6 +47,15 @@ export async function createMasterValue(input: { categoryId: string; label: stri
       where: { categoryId_normalizedKey: { categoryId: cat.id, normalizedKey: key } },
     });
     if (existing) {
+      // A predefined material value hidden because old records use it: adding it makes it the user's own value.
+      if (!existing.isActive && existing.isSystem && TYPED_ONLY_CODES.includes(cat.code as MasterCode)) {
+        await prisma.$transaction(async (tx) => {
+          await tx.masterValue.update({ where: { id: existing.id }, data: { isActive: true, isSystem: false, label } });
+          await audit(tx, { entityType: "MasterValue", entityId: existing.id, action: "CREATE", summary: `${cat.name}: ${label}`, userId: user.id });
+        });
+        revalidatePath("/master-data");
+        return { ok: true, data: { id: existing.id }, message: `Added “${label}” to ${cat.name}.` };
+      }
       if (!existing.isActive) {
         return fail(`“${existing.label}” already exists but is disabled — reactivate it instead.`, {
           label: "Already exists (disabled).",

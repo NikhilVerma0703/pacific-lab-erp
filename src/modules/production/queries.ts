@@ -181,7 +181,8 @@ export interface RegisterRow {
   remarks: string | null;
 }
 
-export const REGISTER_PAGE_SIZE = 20;
+/** The register shows the latest 15 entries per page. */
+export const REGISTER_PAGE_SIZE = 15;
 
 /** Saved production samples, newest first, one page at a time. */
 export async function getProductionRegister(page = 1): Promise<{ rows: RegisterRow[]; total: number; page: number; pages: number }> {

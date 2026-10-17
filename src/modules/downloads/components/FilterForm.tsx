@@ -2,16 +2,14 @@
 
 import { Filter, RotateCcw } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Field } from "@/components/ui/Field";
-import { SAMPLE_TYPE_OPTIONS, type ExportFilters } from "../filters";
+import { MasterPicker } from "@/components/ui/MasterPicker";
+import { normalizeKey } from "@/lib/normalize";
+import type { MasterOption, MasterRef } from "@/modules/master-data/types";
+import { SAMPLE_TYPE_OPTIONS, type ExportFilters, type SampleType } from "../filters";
 import { periodProblem, type Period } from "../period";
 import { ProductionDateFields } from "./ProductionDateFields";
-
-interface Opt {
-  id: string;
-  label: string;
-}
 
 /**
  * The filter bar. A plain GET form: Apply puts the filters in the URL, the
@@ -20,18 +18,27 @@ interface Opt {
 export function FilterForm({
   today,
   initial,
-  patterns,
-  showProduction,
+  types,
+  sampleDesigns,
+  designTypes,
 }: {
   today: string;
   initial: ExportFilters;
-  patterns: Opt[];
-  /** Offer "Production Samples" (users who may view them). */
-  showProduction: boolean;
+  /** The reports this user may see. */
+  types: SampleType[];
+  /** Every Design Name saved on the three forms. */
+  sampleDesigns: string[];
+  /** Every design type saved on the three forms. */
+  designTypes: string[];
 }) {
-  const [design, setDesign] = useState(initial.design);
   const [period, setPeriod] = useState<Period>(initial.period);
   const [tried, setTried] = useState(false);
+  const designOptions = useMemo<MasterOption[]>(() => sampleDesigns.map((label) => ({ id: label, label, code: null, isActive: true })), [sampleDesigns]);
+  const [design, setDesign] = useState<MasterRef | null>(() => {
+    const found = sampleDesigns.find((d) => normalizeKey(d) === normalizeKey(initial.sampleDesign));
+    return initial.sampleDesign ? { id: found ?? initial.sampleDesign, label: found ?? initial.sampleDesign } : null;
+  });
+  const typeChoices = initial.designType && !designTypes.some((t) => normalizeKey(t) === normalizeKey(initial.designType)) ? [...designTypes, initial.designType] : designTypes;
   const problem = periodProblem(period);
 
   return (
@@ -58,31 +65,35 @@ export function FilterForm({
         </p>
       )}
 
-      {/* Rows below: any combination of filters — every one chosen must match. */}
+      {/* Row 2: which form, then any combination of filters — every one chosen must match. */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Field label="Sample Type" htmlFor="f-type">
           <select id="f-type" name="type" className="input" defaultValue={initial.sampleType}>
-            <option value="">All sample types</option>
-            {SAMPLE_TYPE_OPTIONS.filter((o) => showProduction || o.value !== "PRODUCTION").map((o) => (
+            {SAMPLE_TYPE_OPTIONS.filter((o) => types.includes(o.value)).map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
               </option>
             ))}
           </select>
         </Field>
-        <Field label="Design" htmlFor="f-design">
-          <select id="f-design" name="design" className="input" value={design} onChange={(e) => setDesign(e.target.value as typeof design)}>
-            <option value="">All designs</option>
-            <option value="PLAIN_BODY">Plain Body</option>
-            <option value="NON_PLAIN_BODY">Non-Plain Body</option>
-          </select>
+        <Field label="Sample Design" htmlFor="f-sdesign">
+          <MasterPicker
+            id="f-sdesign"
+            options={designOptions}
+            value={design}
+            onChange={setDesign}
+            allowCustom={false}
+            placeholder="All sample designs"
+            noun="sample design"
+          />
+          <input type="hidden" name="sdesign" value={design?.label ?? ""} />
         </Field>
-        <Field label="Design Pattern" htmlFor="f-pattern">
-          <select id="f-pattern" name="pattern" className="input" defaultValue={initial.pattern} disabled={design === "PLAIN_BODY"}>
-            <option value="">All patterns</option>
-            {patterns.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
+        <Field label="Design Type" htmlFor="f-dtype">
+          <select id="f-dtype" name="dtype" className="input" defaultValue={typeChoices.find((t) => normalizeKey(t) === normalizeKey(initial.designType)) ?? ""}>
+            <option value="">All design types</option>
+            {typeChoices.map((t) => (
+              <option key={t} value={t}>
+                {t}
               </option>
             ))}
           </select>

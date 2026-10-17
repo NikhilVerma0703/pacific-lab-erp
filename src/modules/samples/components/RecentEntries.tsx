@@ -12,7 +12,7 @@ import type { RecentRow } from "../queries";
 
 /**
  * Recent Entries under the Lab Sample form: every saved sample, newest
- * first, 20 per page — Date, S.No., Slab Number, Design Name, Design, Number
+ * first, 15 per page — Date, S.No., Slab Number, Design Name, Design Type, Number
  * of Bodies, Remarks (+ files), Review, Edit / Delete.
  */
 export function RecentEntries({
@@ -104,7 +104,7 @@ export function RecentEntries({
                   <th className="th whitespace-normal">S.No.</th>
                   <th className="th whitespace-normal">Slab Number</th>
                   <th className="th whitespace-normal">Design Name</th>
-                  <th className="th whitespace-normal">Design</th>
+                  <th className="th whitespace-normal">Design Type</th>
                   <th className="th whitespace-normal">Number of Bodies</th>
                   <th className="th whitespace-normal">Remarks</th>
                   <th className="th">Review</th>
@@ -156,7 +156,7 @@ export function RecentEntries({
                   </p>
                 </div>
                 <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-[14px]">
-                  <dt className="text-ink-3">Design</dt>
+                  <dt className="text-ink-3">Design Type</dt>
                   <dd>{dash(r.design)}</dd>
                   <dt className="text-ink-3">No. of Bodies</dt>
                   <dd>{dash(r.numberOfBodies)}</dd>

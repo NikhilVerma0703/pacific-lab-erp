@@ -38,6 +38,7 @@ export default async function EditSamplePage({ params }: { params: Promise<{ id:
       <LabSampleForm
         key={s.updatedAt}
         mode="edit"
+        numbers={{ serialNo: s.serialNo, slabNumber: s.slabNumber, first: false }}
         sampleId={s.id}
         defaults={toLabFormInput(s)}
         attachments={s.attachments}

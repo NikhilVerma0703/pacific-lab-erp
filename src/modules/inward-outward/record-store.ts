@@ -2,6 +2,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { prisma, type Tx } from "@/lib/db";
 import { inwardInclude } from "./include";
+import { inwardDesignOf } from "./design-text";
 import { toInwardDetail } from "./queries";
 
 /**
@@ -13,7 +14,8 @@ import { toInwardDetail } from "./queries";
  * Sample form's Design Name suggestions read it). Written inside the save
  * transaction, removed with the entry.
  */
-export const INWARD_RECORD_VERSION = 1;
+// 2: Plain Body / design types of the earlier form's entries read body by body.
+export const INWARD_RECORD_VERSION = 2;
 
 export async function writeInwardRecord(tx: Tx, entryId: string) {
   const e = await tx.inwardOutwardEntry.findUnique({ where: { id: entryId }, include: inwardInclude });
@@ -22,6 +24,7 @@ export async function writeInwardRecord(tx: Tx, entryId: string) {
     return;
   }
   const d = toInwardDetail(e);
+  const design = inwardDesignOf(d);
   const row = {
     serialNo: d.serialNo,
     slabNumber: d.slabNumber,
@@ -30,8 +33,8 @@ export async function writeInwardRecord(tx: Tx, entryId: string) {
     company: d.company?.label ?? null,
     designNameId: d.sampleDesignNameRef?.id ?? null,
     designName: d.sampleDesignName,
-    plainBody: d.plainBody,
-    designTypes: d.plainBody === false ? d.designTypes.map((t) => t.type) : [],
+    plainBody: design.plainBody,
+    designTypes: design.types,
     numberOfBodies: d.numberOfBodies,
     formVersion: INWARD_RECORD_VERSION,
     data: JSON.parse(JSON.stringify(d)) as Prisma.InputJsonValue,

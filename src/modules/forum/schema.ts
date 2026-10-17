@@ -3,14 +3,19 @@ import { POST_KIND_VALUES, POST_STATUS_VALUES, type PostKind, type PostStatus } 
 
 /**
  * While sign-in is off everyone works as one built-in user, so the person
- * posting or replying types their name (remembered on that computer). When
+ * posting or replying types their name: a new post starts with "Admin"
+ * (editable); every reply asks for the name, nothing pre-filled. When
  * sign-in returns, drop `authorName` and take the signed-in user's name.
  */
 const authorName = z.string().trim().min(1, "Enter your name.").max(80, "Keep the name under 80 characters.");
 
+/** Who a new post is from until someone types another name. */
+export const DEFAULT_POSTER = "Admin";
+
 export const postSchema = z.object({
   kind: z.enum(POST_KIND_VALUES as [PostKind, ...PostKind[]]),
-  title: z.string().trim().min(1, "Enter a title.").max(150, "Keep the title under 150 characters."),
+  /** Optional — the message alone is enough to post. */
+  title: z.string().trim().max(150, "Keep the title under 150 characters."),
   message: z.string().trim().min(1, "Enter the message.").max(4000, "Keep the message under 4000 characters."),
   important: z.boolean(),
   status: z.enum(POST_STATUS_VALUES as [PostStatus, ...PostStatus[]]),
@@ -27,7 +32,7 @@ export const statusSchema = z.enum(POST_STATUS_VALUES as [PostStatus, ...PostSta
 export type PostInput = z.input<typeof postSchema>;
 export type ReplyInput = z.input<typeof replySchema>;
 
-export const emptyPost = (authorName = ""): PostInput => ({
+export const emptyPost = (authorName = DEFAULT_POSTER): PostInput => ({
   kind: "ANNOUNCEMENT",
   title: "",
   message: "",
@@ -35,3 +40,10 @@ export const emptyPost = (authorName = ""): PostInput => ({
   status: "OPEN",
   authorName,
 });
+
+/** A post's heading: its title, or the start of its message when it has none. */
+export function postHeading(p: { title: string; message: string }): string {
+  if (p.title.trim()) return p.title;
+  const m = p.message.trim().replace(/\s+/g, " ");
+  return m.length > 60 ? `${m.slice(0, 57)}…` : m;
+}

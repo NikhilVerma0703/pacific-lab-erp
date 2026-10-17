@@ -6,7 +6,7 @@
  * else by name), so it counts as a design pattern for the Dashboard and
  * Downloads. Pure — shared by the browser, the server and the tests.
  */
-import { normalizeKey } from "@/lib/normalize";
+import { compareLabels, normalizeKey } from "@/lib/normalize";
 import { VALUE_CODE } from "@/modules/master-data/catalog";
 
 export const DESIGN_TYPES = [
@@ -33,9 +33,60 @@ export function typeOfPattern(p: { code?: string | null; label: string }): Desig
 /** The selected types, each once, in the form's order. */
 export const orderTypes = (keys: readonly string[]): DesignTypeKey[] => DESIGN_TYPES.map((t) => t.key).filter((k) => keys.includes(k));
 
+/**
+ * The design types a record counts under in Reports: "Plain Body", or each
+ * selected type ("Roy Body", "Carrara" …); Plain Body – No without a type →
+ * "Non-Plain (no type)"; nothing when Plain Body was not answered.
+ */
+export function designTypeLabels(plainBody: boolean | null, types: readonly string[]): string[] {
+  if (plainBody === true) return ["Plain Body"];
+  if (plainBody === false) {
+    const keys = orderTypes(types);
+    return keys.length ? keys.map((k) => designType(k).label) : ["Non-Plain (no type)"];
+  }
+  return [];
+}
+
 /** "Plain Body" / "Roy Body, Carrara" / "Non-Plain Body" — an entry's design in a few words. */
 export function designSummary(plainBody: boolean | null, types: readonly DesignTypeKey[]): string {
   if (plainBody === true) return "Plain Body";
   if (plainBody === false) return types.length ? orderTypes(types).map((k) => designType(k).label).join(", ") : "Non-Plain Body";
   return "";
+}
+
+export const PLAIN_BODY_LABEL = "Plain Body";
+
+type PatternLike = { code?: string | null; label: string };
+
+/**
+ * Every Design Type a saved record carries, for the Downloads filter:
+ * "Plain Body", each design type ("Roy Body", "Kreos" …) and any other design
+ * pattern an earlier form recorded ("Calacatta" …). Records of the earlier
+ * forms are read body by body, so a sample with a Plain body and a Roy Body
+ * body carries both. In form order; other patterns A–Z.
+ */
+export function designTypeTags(d: {
+  plainBody: boolean | null;
+  types: readonly string[];
+  bodies?: readonly { designCategory: "PLAIN_BODY" | "NON_PLAIN_BODY" | null; designPatterns: readonly PatternLike[] }[];
+  otherPatterns?: readonly PatternLike[];
+}): string[] {
+  let plain = d.plainBody === true;
+  const keys = new Set<DesignTypeKey>(d.plainBody === false ? orderTypes(d.types) : []);
+  const other = new Map<string, string>();
+  const add = (p: PatternLike) => {
+    const k = typeOfPattern(p);
+    if (k) keys.add(k);
+    else other.set(normalizeKey(p.label), p.label);
+  };
+  for (const b of d.bodies ?? []) {
+    if (b.designCategory === "PLAIN_BODY") plain = true;
+    else b.designPatterns.forEach(add);
+  }
+  if (d.plainBody !== true) (d.otherPatterns ?? []).forEach(add);
+  return [
+    ...(plain ? [PLAIN_BODY_LABEL] : []),
+    ...orderTypes([...keys]).map((k) => designType(k).label),
+    ...[...other.values()].sort(compareLabels),
+  ];
 }

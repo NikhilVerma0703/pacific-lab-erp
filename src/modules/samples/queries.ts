@@ -6,7 +6,6 @@ import { designSummary, orderTypes, typeOfPattern, type DesignTypeKey } from "@/
 import { emptyBodyReadings, type BodyReadingsInput } from "@/modules/forms/fields";
 import { emptyGritRow, emptyMaterialRow, type MaterialsInput } from "@/modules/forms/materials";
 import type { MasterRef } from "@/modules/master-data/types";
-import { bodiesDesignText } from "./bodies";
 import type { LabFormInput } from "./schema";
 import { sampleInclude } from "./include";
 
@@ -459,11 +458,9 @@ export function toLabFormInput(d: SampleDetail): LabFormInput {
   };
 }
 
-/** "Plain Body" · "Roy Body, Carrara" — or, for the earlier form, the design per body. */
+/** Register "Design Type": Plain Body, or every selected design type ("Roy Body, Carrara"). */
 export function sampleDesignText(d: SampleDetail): string {
-  const recorded = d.plainBody === true || d.designTypes.some((t) => t.bodyCount !== null || t.veinPresent !== null || t.colours.length > 0);
-  if (recorded || !d.bodies.length) return designSummary(d.plainBody, d.designTypes.map((t) => t.type));
-  return bodiesDesignText(d.bodies.map((b) => ({ designCategory: b.designCategory, patterns: b.designPatterns })));
+  return designSummary(d.plainBody, d.designTypes.map((t) => t.type));
 }
 
 // ── Recent Entries ───────────────────────────────────────────────────────────
@@ -481,7 +478,8 @@ export interface RecentRow {
   files: number;
 }
 
-export const RECENT_PAGE_SIZE = 20;
+/** Recent Entries shows the latest 15 samples per page. */
+export const RECENT_PAGE_SIZE = 15;
 
 /** Saved samples, newest first, one page at a time. */
 export async function getRecentSamples(page = 1): Promise<{ rows: RecentRow[]; total: number; page: number; pages: number }> {

@@ -34,6 +34,7 @@ export default async function EditInwardPage({ params }: { params: Promise<{ id:
       <InwardForm
         key={e.updatedAt}
         mode="edit"
+        numbers={{ serialNo: e.serialNo, slabNumber: e.slabNumber, first: false }}
         entryId={e.id}
         defaults={toInwardFormInput(e)}
         attachments={e.attachments}

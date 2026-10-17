@@ -41,6 +41,7 @@ export default async function SamplesPage({ searchParams }: { searchParams: Prom
       {canCreate ? (
         <LabSampleForm
           mode="create"
+          numbers={numbers}
           defaults={newLabInput({ ...numbers, today: plantToday() })}
           attachments={[]}
           options={options}

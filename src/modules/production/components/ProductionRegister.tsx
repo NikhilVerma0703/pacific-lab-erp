@@ -6,14 +6,14 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/Dialog";
-import { formatDate, formatNumber } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 import { deleteProductionAction } from "../actions";
 import type { RegisterRow } from "../queries";
 
 /**
  * The Production Sample Register under the form: every saved entry, newest
  * first, 20 per page — Date, S.No., Slab Number, Design Name, Number of
- * Bodies, L, a, b Details (Body 1 … N), Remarks (+ files), Review, Edit / Delete.
+ * Bodies, Remarks (+ files), Review, Edit / Delete — the L, a, b readings are on the Review page.
  */
 export function ProductionRegister({
   rows,
@@ -106,7 +106,6 @@ export function ProductionRegister({
                   <th className="th whitespace-normal">Slab Number</th>
                   <th className="th whitespace-normal">Design Name</th>
                   <th className="th whitespace-normal">Number of Bodies</th>
-                  <th className="th whitespace-normal">L, a, b Details</th>
                   <th className="th whitespace-normal">Remarks</th>
                   <th className="th">Review</th>
                   <th className="th whitespace-normal">Actions</th>
@@ -120,9 +119,6 @@ export function ProductionRegister({
                     <td className="td tabular-nums">{dash(r.slabNumber)}</td>
                     <td className="td">{dash(r.designName)}</td>
                     <td className="td tabular-nums">{dash(r.numberOfBodies)}</td>
-                    <td className="td">
-                      <LabSummary row={r} />
-                    </td>
                     <td className="td min-w-36 max-w-64">
                       {r.remarks ? (
                         <p className="line-clamp-3 text-[13px] text-ink-2" title={r.remarks}>
@@ -157,10 +153,6 @@ export function ProductionRegister({
                 <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-[14px]">
                   <dt className="text-ink-3">No. of Bodies</dt>
                   <dd>{dash(r.numberOfBodies)}</dd>
-                  <dt className="text-ink-3">L, a, b</dt>
-                  <dd className="min-w-0 overflow-x-auto">
-                    <LabSummary row={r} />
-                  </dd>
                   <dt className="text-ink-3">Remarks</dt>
                   <dd className="min-w-0">
                     <span className="line-clamp-3 break-words">{dash(r.remarks)}</span>
@@ -236,37 +228,5 @@ function FilesBadge({ n }: { n: number }) {
     <span className="badge mt-1 gap-1 bg-mute-bg text-ink-2">
       <Paperclip className="size-3" /> {n} {n === 1 ? "file" : "files"}
     </span>
-  );
-}
-
-/** Compact L, a, b for the register, body by body: "B1 · Post Press", "B1 · Post Polish". */
-function LabSummary({ row }: { row: RegisterRow }) {
-  const lines: { key: string; label: string; v: { l: string | null; a: string | null; b: string | null } }[] = [];
-  for (const b of row.bodies) {
-    if (b.postPress) lines.push({ key: `${b.index}-pp`, label: `B${b.index} · Post Press`, v: b.postPress });
-    if (b.postPolish) lines.push({ key: `${b.index}-pl`, label: `B${b.index} · Post Polish`, v: b.postPolish });
-  }
-  if (!lines.length) return <span className="text-ink-3">—</span>;
-  return (
-    <table className="text-[12px] tabular-nums">
-      <thead>
-        <tr className="text-ink-3">
-          <th className="pr-2 text-left font-semibold" />
-          <th className="px-1.5 text-right font-semibold">L</th>
-          <th className="px-1.5 text-right font-semibold">a</th>
-          <th className="pl-1.5 text-right font-semibold">b</th>
-        </tr>
-      </thead>
-      <tbody>
-        {lines.map((x) => (
-          <tr key={x.key}>
-            <td className="pr-2 whitespace-nowrap text-brand">{x.label}</td>
-            <td className="px-1.5 text-right">{formatNumber(x.v.l)}</td>
-            <td className="px-1.5 text-right">{formatNumber(x.v.a)}</td>
-            <td className="pl-1.5 text-right">{formatNumber(x.v.b)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
   );
 }

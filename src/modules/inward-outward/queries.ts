@@ -12,7 +12,7 @@ import {
   type LabValueDTO,
   type ValueDTO,
 } from "@/modules/samples/queries";
-import { inwardDesignText } from "./design-text";
+import { inwardDesignTypeText } from "./design-text";
 import { DESIGN_TYPES, orderTypes, type DesignTypeKey } from "@/modules/forms/design-types";
 import { emptyVeinType, type InwardFormInput } from "./schema";
 import { inwardInclude } from "./include";
@@ -269,7 +269,8 @@ export interface InwardRegisterRow {
   files: number;
 }
 
-export const REGISTER_PAGE_SIZE = 20;
+/** The register shows the latest 15 entries per page. */
+export const REGISTER_PAGE_SIZE = 15;
 
 /** Saved entries, newest first, one page at a time. */
 export async function getInwardRegister(page = 1): Promise<{ rows: InwardRegisterRow[]; total: number; page: number; pages: number }> {
@@ -291,7 +292,7 @@ export async function getInwardRegister(page = 1): Promise<{ rows: InwardRegiste
       slabNumber: d.slabNumber,
       company: d.company?.label ?? null,
       designName: d.sampleDesignName,
-      design: inwardDesignText(d),
+      design: inwardDesignTypeText(d),
       numberOfBodies: d.numberOfBodies,
       labSampleSerial: d.labSample?.serialNo ?? null,
       // The earlier form had Lab Recreation Attempts instead of Remarks.
@@ -301,43 +302,3 @@ export async function getInwardRegister(page = 1): Promise<{ rows: InwardRegiste
   });
   return { rows, total, page: p, pages };
 }
-
-// ── Rectification ────────────────────────────────────────────────────────────
-
-export interface RectificationRow {
-  id: string;
-  serialNo: number;
-  slabNumber: number | null;
-  sampleDate: string;
-  status: "DRAFT" | "SUBMITTED";
-  remarks: string | null;
-  createdBy: string | null;
-}
-
-/** Lab samples saved with Physical Sample Available? = No (not yet received). */
-export async function getRectification(): Promise<RectificationRow[]> {
-  const rows = await prisma.labSample.findMany({
-    where: { physicalSamplePresent: false },
-    orderBy: [{ sampleDate: "desc" }, { serialNo: "desc" }],
-    take: 200,
-    select: {
-      id: true,
-      serialNo: true,
-      slabNumber: true,
-      sampleDate: true,
-      status: true,
-      remarks: true,
-      createdBy: { select: { name: true } },
-    },
-  });
-  return rows.map((r) => ({
-    id: r.id,
-    serialNo: r.serialNo,
-    slabNumber: r.slabNumber,
-    sampleDate: r.sampleDate.toISOString().slice(0, 10),
-    status: r.status,
-    remarks: r.remarks,
-    createdBy: r.createdBy?.name ?? null,
-  }));
-}
-

@@ -18,9 +18,8 @@ import {
   type PostStatus,
 } from "../kinds";
 import type { ForumPostDTO, ForumReplyDTO } from "../queries";
-import { emptyPost, type PostInput } from "../schema";
+import { emptyPost, postHeading, type PostInput } from "../schema";
 import { PostCard } from "./PostCard";
-import { useForumName } from "./forum-ui";
 
 type Filter = "ALL" | PostStatus;
 
@@ -45,7 +44,6 @@ export function Forum({
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [name, rememberName] = useForumName();
   const [filter, setFilter] = useState<Filter>("ALL");
   const [editing, setEditing] = useState<{ id?: string; values: PostInput } | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -63,7 +61,7 @@ export function Forum({
 
   function openNew() {
     setErrors({});
-    setEditing({ values: emptyPost(name) });
+    setEditing({ values: emptyPost() });
   }
 
   function openEdit(p: ForumPostDTO) {
@@ -95,7 +93,6 @@ export function Forum({
         toast.error(r.error);
         return;
       }
-      if (!editing.id) rememberName(editing.values.authorName);
       toast.success(r.message ?? "Saved.");
       setEditing(null);
       setErrors({});
@@ -138,7 +135,7 @@ export function Forum({
     <section id="forum" className="scroll-mt-20" aria-labelledby="forum-h">
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <h2 id="forum-h" className="flex items-center gap-2 text-[13px] font-bold tracking-widest text-ink-2 uppercase">
-          <MessagesSquare className="size-4" /> Forum
+          <MessagesSquare className="size-4" /> Posts
         </h2>
         <span className="flex-1" />
         {canPost && (
@@ -183,8 +180,6 @@ export function Forum({
             <PostCard
               key={p.id}
               post={p}
-              name={name}
-              onName={rememberName}
               perms={{
                 canReply,
                 canStatus,
@@ -253,7 +248,7 @@ export function Forum({
                 ))}
               </select>
             </Field>
-            <Field label="Title" htmlFor="post-title" error={errors.title} className="sm:col-span-2">
+            <Field label="Title (optional)" htmlFor="post-title" error={errors.title} className="sm:col-span-2">
               <input
                 id="post-title"
                 className={cn("input", errors.title && "input-error")}
@@ -279,7 +274,7 @@ export function Forum({
       <ConfirmDialog
         open={!!removing}
         title="Remove post?"
-        message={<p>“{removing?.title}” and its replies will no longer be shown in the Forum. They stay in the records.</p>}
+        message={<p>“{removing ? postHeading(removing) : ""}” and its replies will no longer be shown in the Forum. They stay in the records.</p>}
         confirmLabel="Remove"
         busy={pending}
         onCancel={() => setRemoving(null)}

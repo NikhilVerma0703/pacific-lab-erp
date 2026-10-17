@@ -7,6 +7,7 @@ import { useEffect, useState, useTransition } from "react";
 import { Controller, FormProvider, useForm, useFormContext, useWatch, type Resolver } from "react-hook-form";
 import { toast } from "sonner";
 import { ColourQuantityFields } from "@/components/forms/ColourQuantityFields";
+import { DateNumberFields, type DateNumbers } from "@/components/forms/DateNumberFields";
 import { errorAt } from "@/components/forms/errors";
 import { ReadingRowsFields } from "@/components/forms/ReadingRowsFields";
 import { SubPart, VeinTypeFields } from "@/components/forms/VeinTypeFields";
@@ -46,6 +47,7 @@ export function InwardForm({
   defaults,
   attachments: initialFiles,
   options,
+  numbers: initialNumbers,
   permissions,
   maxUploadMb,
 }: {
@@ -56,11 +58,16 @@ export function InwardForm({
   options: MasterOptions;
   permissions: InwardFormPermissions;
   maxUploadMb: number;
+  /** S.No. / Slab Number for the date in `defaults` (from the saved records). */
+  numbers: DateNumbers;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [files, setFiles] = useState<AttachmentDTO[]>(initialFiles);
   const [baseline, setBaseline] = useState(defaults);
+  // S.No. / Slab Number the server suggested for the form's date.
+  const [numbers, setNumbers] = useState<DateNumbers>(initialNumbers);
+  const [numbersKey, setNumbersKey] = useState(0);
   const [confirm, setConfirm] = useState<null | "reset" | "cancel">(null);
   const env: Env = { options, allowCustom: permissions.addMaster };
 
@@ -97,8 +104,7 @@ export function InwardForm({
           // saving at once never collide on a stale suggestion.
           const r = await saveInwardAction(raw, {
             id: entryId,
-            autoSerial: mode === "create" && raw.serialNo === baseline.serialNo,
-            autoSlab: mode === "create" && raw.slabNumber === baseline.slabNumber,
+            autoSlab: mode === "create" && numbers.slabNumber !== null && String(raw.slabNumber) === String(numbers.slabNumber),
           });
           if (!r.ok) {
             toast.error(r.error);
@@ -114,9 +120,12 @@ export function InwardForm({
             return;
           }
           // New entry: clear the form and suggest the next numbers.
-          const next = await nextInwardNumbersAction();
-          const fresh = { ...baseline, serialNo: String(next.serialNo), slabNumber: String(next.slabNumber), entryDate: getValues("entryDate") };
+          const day = String(getValues("entryDate") ?? "");
+          const next = await nextInwardNumbersAction(day);
+          const fresh = { ...baseline, entryDate: day, serialNo: String(next.serialNo), slabNumber: next.slabNumber === null ? "" : String(next.slabNumber) };
           setBaseline(fresh);
+          setNumbers(next);
+          setNumbersKey((k) => k + 1);
           reset(fresh);
           setFiles([]);
           router.refresh();
@@ -151,15 +160,17 @@ export function InwardForm({
         {/* 1 · Sample Details */}
         <FormSection index={next()} title="Sample Details">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-            <Field label="Date" htmlFor="io-date" error={errorAt(errors, "entryDate")}>
-              <input id="io-date" type="date" className={cn("input", errorAt(errors, "entryDate") && "input-error")} {...register("entryDate")} />
-            </Field>
-            <Field label="S.No." htmlFor="io-serialNo" error={errorAt(errors, "serialNo")}>
-              <NumberBox id="io-serialNo" name="serialNo" editable={permissions.overrideNumbers} invalid={!!errorAt(errors, "serialNo")} />
-            </Field>
-            <Field label="Slab Number" htmlFor="io-slabNumber" error={errorAt(errors, "slabNumber")}>
-              <NumberBox id="io-slabNumber" name="slabNumber" editable={permissions.overrideNumbers} invalid={!!errorAt(errors, "slabNumber")} />
-            </Field>
+            <DateNumberFields
+              key={numbersKey}
+              idPrefix="io"
+              dateName="entryDate"
+              mode={mode}
+              initial={numbers}
+              fetchNumbers={(d) => nextInwardNumbersAction(d, entryId)}
+              onNumbers={setNumbers}
+              canChangeDate={true}
+              canOverride={permissions.overrideNumbers}
+            />
             <Field label="Company Name" htmlFor="io-company" error={errorAt(errors, "company.label")}>
               <Controller
                 control={control}
@@ -363,20 +374,6 @@ function measurementsSummary(l: ReturnType<typeof inwardLayout>): string | undef
   if (l.royN) parts.push(`${l.royN} Roy Bod${l.royN === 1 ? "y" : "ies"}`);
   if (l.chessN) parts.push(`${l.chessN} Chessboard Bod${l.chessN === 1 ? "y" : "ies"}`);
   return parts.length ? `${parts.join(" · ")} — one L, a, b reading each` : undefined;
-}
-
-/** S.No. / Slab Number — suggested by the system; typed over only by roles allowed to. */
-function NumberBox({ id, name, editable, invalid }: { id: string; name: "serialNo" | "slabNumber"; editable: boolean; invalid: boolean }) {
-  const { register } = useFormContext<InwardFormInput>();
-  return (
-    <input
-      id={id}
-      inputMode="numeric"
-      readOnly={!editable}
-      className={cn("input tabular-nums", !editable && "bg-mute-bg text-ink-2", invalid && "input-error")}
-      {...register(name)}
-    />
-  );
 }
 
 function ReadingGroup({ title, hint, n, tone = "brand", children }: { title: string; hint: string; n: number; tone?: "brand" | "accent"; children: React.ReactNode }) {

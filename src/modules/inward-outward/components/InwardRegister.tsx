@@ -13,7 +13,7 @@ import type { InwardRegisterRow as RegisterRow } from "../queries";
 /**
  * The Sample Inward / Outward Register under the form: every saved entry,
  * newest first, 20 per page — Date, S.No., Slab Number, Company Name, Design
- * Name, Design, Number of Bodies, Remarks (+ files), Review, Edit / Delete.
+ * Name, Design Type, Number of Bodies, Remarks (+ files), Review, Edit / Delete.
  */
 export function InwardRegister({
   rows,
@@ -106,7 +106,7 @@ export function InwardRegister({
                   <th className="th whitespace-normal">Slab Number</th>
                   <th className="th whitespace-normal">Company Name</th>
                   <th className="th whitespace-normal">Design Name</th>
-                  <th className="th whitespace-normal">Design</th>
+                  <th className="th whitespace-normal">Design Type</th>
                   <th className="th whitespace-normal">Number of Bodies</th>
                   <th className="th whitespace-normal">Remarks</th>
                   <th className="th">Review</th>
@@ -161,7 +161,7 @@ export function InwardRegister({
                 <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-[14px]">
                   <dt className="text-ink-3">Company</dt>
                   <dd>{dash(r.company)}</dd>
-                  <dt className="text-ink-3">Design</dt>
+                  <dt className="text-ink-3">Design Type</dt>
                   <dd>{dash(r.design)}</dd>
                   <dt className="text-ink-3">No. of Bodies</dt>
                   <dd>{dash(r.numberOfBodies)}</dd>

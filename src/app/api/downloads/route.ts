@@ -2,18 +2,21 @@ import { NextResponse } from "next/server";
 import { can } from "@/lib/permissions";
 import { plantToday } from "@/lib/plant-time";
 import { currentUser } from "@/lib/session";
-import { completeIn, inwardDesignsFor, inwardIn, productionIn, samplesIn } from "@/modules/downloads/data";
-import { completeWorkbook, dataEntryWorkbook, filteredWorkbook, inwardWorkbook, productionWorkbook } from "@/modules/downloads/excel";
-import { applyFilters, parseFilters, wantsLab, wantsProduction } from "@/modules/downloads/filters";
-import { filterLabels } from "@/modules/downloads/labels";
+import { filterSource, inwardIn, productionIn, samplesIn } from "@/modules/downloads/data";
+import { filteredWorkbook, inwardWorkbook, labWorkbook, productionWorkbook } from "@/modules/downloads/excel";
+import { applyFilters, parseFilters, sampleTypeOption, type SampleType } from "@/modules/downloads/filters";
 import { isIsoDate, parsePeriod, periodFileTag } from "@/modules/downloads/period";
 
 export const dynamic = "force-dynamic";
 
 const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
+const FILE: Record<SampleType, string> = { LAB: "Lab-Sample", INWARD: "Inward-Outward-Sample", PRODUCTION: "Production-Sample" };
+/** Download kind → report ("entry" is the earlier name of the Lab Sample report). */
+const REPORT: Record<string, SampleType> = { lab: "LAB", entry: "LAB", inward: "INWARD", production: "PRODUCTION" };
+
 /**
- * GET /api/downloads?kind=entry|inward|complete|production|filtered
+ * GET /api/downloads?kind=lab|inward|production|filtered
  *   &period=all | period=date&date=YYYY-MM-DD | period=range&from=YYYY-MM-DD&to=YYYY-MM-DD
  *   [&filters…]
  * Streams an .xlsx with only the records of that Production Date (and filters).
@@ -37,34 +40,25 @@ export async function GET(req: Request) {
   let file: Buffer;
   let name: string;
   try {
+    const report = kind ? REPORT[kind] : undefined;
+    const refuse = (t: SampleType) => NextResponse.json({ error: `You cannot view ${sampleTypeOption(t).record.toLowerCase()}s.` }, { status: 403 });
     switch (kind) {
+      case "lab":
       case "entry":
-        file = await dataEntryWorkbook(await samplesIn(period));
-        name = `Data-Entry-Samples_${tag}.xlsx`;
-        break;
       case "inward":
-        file = await inwardWorkbook(await inwardIn(period));
-        name = `Inward-Outward-Samples_${tag}.xlsx`;
+      case "production": {
+        const t = report!;
+        if (!can(user, sampleTypeOption(t).permission)) return refuse(t);
+        file = t === "LAB" ? await labWorkbook(await samplesIn(period)) : t === "INWARD" ? await inwardWorkbook(await inwardIn(period)) : await productionWorkbook(await productionIn(period));
+        name = `${FILE[t]}-Report_${tag}.xlsx`;
         break;
-      case "production":
-        if (!can(user, "production.view")) return NextResponse.json({ error: "You cannot view production samples." }, { status: 403 });
-        file = await productionWorkbook(await productionIn(period));
-        name = `Production-Samples_${tag}.xlsx`;
-        break;
-      case "complete":
-        file = await completeWorkbook(await completeIn(period));
-        name = `Complete-Sample-Report_${tag}.xlsx`;
-        break;
+      }
       case "filtered": {
         const filters = parseFilters(query, today);
-        if (filters.sampleType === "PRODUCTION" && !can(user, "production.view")) {
-          return NextResponse.json({ error: "You cannot view production samples." }, { status: 403 });
-        }
-        const samples = wantsLab(filters) ? await samplesIn(filters.period) : [];
-        const productions = wantsProduction(filters) && can(user, "production.view") ? await productionIn(filters.period) : [];
-        const rows = applyFilters(samples, await inwardDesignsFor(samples), productions, filters);
-        file = await filteredWorkbook(rows, filters, await filterLabels(filters));
-        name = `Filtered-Samples_${periodFileTag(filters.period)}.xlsx`;
+        if (!can(user, sampleTypeOption(filters.sampleType).permission)) return refuse(filters.sampleType);
+        const rows = applyFilters(await filterSource(filters.sampleType, filters.period), filters);
+        file = await filteredWorkbook(rows, filters);
+        name = `Filtered-${FILE[filters.sampleType]}s_${periodFileTag(filters.period)}.xlsx`;
         break;
       }
       default:

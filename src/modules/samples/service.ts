@@ -5,6 +5,7 @@ import { audit } from "@/lib/audit";
 import { can } from "@/lib/permissions";
 import { plantToday } from "@/lib/plant-time";
 import type { CurrentUser } from "@/lib/session";
+import { allocateNumbers, dateOnly } from "@/modules/forms/date-numbering";
 import { otherPatternIds, patternFor } from "@/modules/forms/design-server";
 import type { DesignTypeKey } from "@/modules/forms/design-types";
 import { readingIsEmpty, type LabReadingData } from "@/modules/forms/fields";
@@ -13,7 +14,7 @@ import { MASTER, type MasterCode } from "@/modules/master-data/catalog";
 import { MasterValueError, resolveMasterRef } from "@/modules/master-data/service";
 import type { MasterRef } from "@/modules/master-data/types";
 import { sampleInclude } from "./include";
-import { lockLabNumbering, nextLabSerial, nextLabSlab } from "./numbering";
+import { labNumbering, lockLabNumbering, renumberLabDate } from "./numbering";
 import { writeLabRecord } from "./record-store";
 import { writeInwardRecord } from "@/modules/inward-outward/record-store";
 import type { LabFormData } from "./schema";
@@ -30,10 +31,18 @@ export class LabSaveError extends Error {
   }
 }
 
-const dateOnly = (s: string) => new Date(`${s}T00:00:00.000Z`);
 const decimal = (n: number | null) => (n === null ? null : new Prisma.Decimal(n));
 
 type Resolve = (code: MasterCode, ref: MasterRef | null | undefined) => Promise<string | null>;
+
+/** Samples whose S.No. changed: refresh their database copies (and their inward entries' copies, which show the lab S.No.). */
+async function refreshRenumbered(tx: Tx, ids: string[]) {
+  for (const sid of ids) {
+    await writeLabRecord(tx, sid);
+    const inward = await tx.inwardOutwardEntry.findFirst({ where: { labSampleId: sid }, select: { id: true } });
+    if (inward) await writeInwardRecord(tx, inward.id);
+  }
+}
 
 /**
  * One body's Material Details as a formulation (role MAIN_BODY for Body i,
@@ -103,11 +112,10 @@ export async function saveLabSample(args: {
   id?: string;
   data: LabFormData;
   user: CurrentUser;
-  /** Create only: allocate S.No. / Slab even if the form carried a value (an untouched suggestion). */
-  autoSerial?: boolean;
+  /** Create only: the form still shows the suggested Slab Number (allocate it again at save). */
   autoSlab?: boolean;
 }): Promise<{ id: string; serialNo: number; slabNumber: number | null; removedKeys: string[] }> {
-  const { id, data, user, autoSerial, autoSlab } = args;
+  const { id, data, user, autoSlab } = args;
   const canOverride = can(user, "sample.overrideNumbers");
   const canDate = can(user, "sample.changeDate");
   const canAddMaster = can(user, "master.addFromForm");
@@ -139,30 +147,19 @@ export async function saveLabSample(args: {
           return resolveMasterRef(tx, code, ref, user.id);
         };
 
-        // ── numbers ──────────────────────────────────────────────────────────
-        let serialNo: number;
-        let slabNumber: number | null;
-        if (existing) {
-          serialNo = canOverride && data.serialNo !== null ? data.serialNo : existing.serialNo;
-          slabNumber = canOverride ? data.slabNumber : (existing.slabNumber ?? (await nextLabSlab(tx)));
-        } else {
-          serialNo = canOverride && !autoSerial && data.serialNo !== null ? data.serialNo : await nextLabSerial(tx);
-          slabNumber = canOverride && !autoSlab ? data.slabNumber : await nextLabSlab(tx);
-        }
-        const fieldErrors: Record<string, string> = {};
-        const notMe = existing ? { NOT: { id: existing.id } } : {};
-        if (await tx.labSample.findFirst({ where: { serialNo, ...notMe }, select: { id: true } })) {
-          fieldErrors.serialNo = `S.No. ${serialNo} is already used by another sample.`;
-        }
-        if (slabNumber !== null) {
-          const clash = await tx.labSample.findFirst({ where: { slabNumber, ...notMe }, select: { serialNo: true } });
-          if (clash) fieldErrors.slabNumber = `Slab ${slabNumber} is already used by S.No. ${clash.serialNo}.`;
-        }
+        // ── date and numbers (S.No. 1, 2, 3 … within the date) ──────────────
+        const keptDate = existing ? existing.sampleDate.toISOString().slice(0, 10) : plantToday();
+        const sampleDate = dateOnly(canDate ? (data.sampleDate ?? keptDate) : keptDate);
+        const { serialNo, slabNumber, moved, fieldErrors } = await allocateNumbers(labNumbering, tx, {
+          date: sampleDate,
+          existing: existing && { id: existing.id, date: existing.sampleDate, serialNo: existing.serialNo, slabNumber: existing.slabNumber },
+          typedSlab: data.slabNumber,
+          autoSlab: !!autoSlab,
+          canOverride,
+        });
         if (Object.keys(fieldErrors).length) throw new LabSaveError("Duplicate number — see the highlighted fields.", fieldErrors);
 
         // ── the sample ───────────────────────────────────────────────────────
-        const keptDate = existing ? existing.sampleDate.toISOString().slice(0, 10) : plantToday();
-        const sampleDate = dateOnly(canDate ? (data.sampleDate ?? keptDate) : keptDate);
         const n = data.numberOfBodies ?? 0;
         const designCategory = data.plainBody === null ? null : data.plainBody ? ("PLAIN_BODY" as const) : ("NON_PLAIN_BODY" as const);
         const base = {
@@ -299,6 +296,9 @@ export async function saveLabSample(args: {
         }
         if (toRemove.length) await tx.sampleAttachment.deleteMany({ where: { id: { in: toRemove.map((a) => a.id) } } });
 
+        // Moved to another date: close the gap it left there.
+        if (moved) await refreshRenumbered(tx, await renumberLabDate(tx, existing!.sampleDate));
+
         // ── Lab Sample Database: the complete copy of this sample ───────────
         await writeLabRecord(tx, sample.id);
 
@@ -341,8 +341,11 @@ export async function deleteLabSample(id: string, user: CurrentUser): Promise<{ 
     });
     // Design, materials, readings, files and its Lab Sample Database copy cascade;
     // a linked Inward / Outward entry stays (unlinked) — its copy is refreshed.
+    await lockLabNumbering(tx);
     await tx.labSample.delete({ where: { id } });
     if (snapshot.inwardEntry) await writeInwardRecord(tx, snapshot.inwardEntry.id);
+    // S.No. of that date stay 1 … k.
+    await refreshRenumbered(tx, await renumberLabDate(tx, snapshot.sampleDate));
     return { serialNo: snapshot.serialNo, removedKeys: snapshot.attachments.map((a) => a.storageKey) };
   });
 }

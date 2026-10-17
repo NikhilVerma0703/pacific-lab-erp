@@ -1,52 +1,40 @@
 import "server-only";
 import { prisma, type Tx } from "@/lib/db";
+import { plantToday } from "@/lib/plant-time";
+import { dateOnly, numbersFor, renumberDate, type NumberingTable } from "@/modules/forms/date-numbering";
 
 /**
- * Lab Sample S.No. and Slab Number:
- *  - S.No.        highest existing + 1
- *  - Slab Number  the most recent sample's slab + 1, skipping any number that
- *                 is already taken (e.g. one typed in by hand earlier)
- * Saves take a transaction-scoped advisory lock, so two people saving at the
- * same moment cannot receive the same number; the unique constraints on
- * LabSample are the final guarantee.
+ * Lab Sample S.No. and Slab Number — by date, over lab samples only (rules in
+ * `modules/forms/date-numbering.ts`). Saves take a transaction-scoped
+ * advisory lock; (date, S.No.) and Slab Number are unique in the database.
  */
 const LOCK_KEY = 4_471_001; // "lab sample numbering"
-
-/** Start values and step of the series. */
-const NUMBERING = { serialStart: 1, slabStart: 1, step: 1 } as const;
-
-type Db = Tx | typeof prisma;
 
 export async function lockLabNumbering(tx: Tx) {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(${LOCK_KEY})`;
 }
 
-export async function nextLabSerial(db: Db): Promise<number> {
-  const agg = await db.labSample.aggregate({ _max: { serialNo: true } });
-  return (agg._max.serialNo ?? NUMBERING.serialStart - NUMBERING.step) + NUMBERING.step;
+export const labNumbering: NumberingTable = {
+  onDate: (tx, date) =>
+    tx.labSample.findMany({
+      where: { sampleDate: date },
+      select: { id: true, serialNo: true, slabNumber: true },
+      orderBy: [{ serialNo: "asc" }, { createdAt: "asc" }],
+    }),
+  slabOwner: async (tx, slab) => {
+    const r = await tx.labSample.findFirst({ where: { slabNumber: slab }, select: { id: true, serialNo: true, sampleDate: true } });
+    return r ? { id: r.id, serialNo: r.serialNo, date: r.sampleDate } : null;
+  },
+  setSerial: async (tx, id, serialNo) => {
+    await tx.labSample.update({ where: { id }, data: { serialNo } });
+  },
+};
+
+/** The S.No. and starting Slab Number the form shows for a date (YYYY-MM-DD; today when blank). */
+export async function suggestLabNumbers(date?: string | null, excludeId?: string) {
+  const d = dateOnly(date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : plantToday());
+  return prisma.$transaction((tx) => numbersFor(labNumbering, tx, d, excludeId));
 }
 
-export async function nextLabSlab(db: Db): Promise<number> {
-  const last = await db.labSample.findFirst({
-    where: { slabNumber: { not: null } },
-    orderBy: [{ createdAt: "desc" }, { serialNo: "desc" }],
-    select: { slabNumber: true },
-  });
-  let candidate = last?.slabNumber != null ? last.slabNumber + NUMBERING.step : NUMBERING.slabStart;
-  // Skip numbers already used. Bounded: one query per batch of 50.
-  for (let guard = 0; guard < 100; guard++) {
-    const window = Array.from({ length: 50 }, (_, i) => candidate + i * NUMBERING.step);
-    const taken = new Set(
-      (await db.labSample.findMany({ where: { slabNumber: { in: window } }, select: { slabNumber: true } })).map((r) => r.slabNumber),
-    );
-    const free = window.find((n) => !taken.has(n));
-    if (free !== undefined) return free;
-    candidate = window[window.length - 1] + NUMBERING.step;
-  }
-  throw new Error("Could not find a free slab number.");
-}
-
-export async function suggestLabNumbers(): Promise<{ serialNo: number; slabNumber: number }> {
-  const [serialNo, slabNumber] = await Promise.all([nextLabSerial(prisma), nextLabSlab(prisma)]);
-  return { serialNo, slabNumber };
-}
+/** Close the gaps in a date's S.No. (after a delete or a move to another date). */
+export const renumberLabDate = (tx: Tx, date: Date) => renumberDate(labNumbering, tx, date);

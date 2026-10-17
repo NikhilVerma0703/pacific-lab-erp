@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { emptyPost, postSchema, replySchema, statusSchema } from "@/modules/forum/schema";
+import { emptyPost, postHeading, postSchema, replySchema, statusSchema } from "@/modules/forum/schema";
 
 describe("forum post schema", () => {
-  it("needs a name, title and message", () => {
+  it("starts with Posted by = Admin and needs only a message (title optional)", () => {
+    expect(emptyPost().authorName).toBe("Admin");
     const r = postSchema.safeParse(emptyPost());
     expect(r.success).toBe(false);
     const paths = r.success ? [] : r.error.issues.map((i) => i.path[0]);
-    expect(paths).toEqual(expect.arrayContaining(["authorName", "title", "message"]));
+    expect(paths).toEqual(["message"]);
+    const ok = postSchema.parse({ ...emptyPost(), message: "Kiln 2 maintenance on Friday" });
+    expect(ok).toMatchObject({ title: "", authorName: "Admin" });
+    expect(postHeading(ok)).toBe("Kiln 2 maintenance on Friday");
+    expect(postSchema.safeParse({ ...emptyPost(""), message: "m" }).success).toBe(false); // the name can be changed, not emptied
   });
 
   it("accepts a complete post and trims it", () => {

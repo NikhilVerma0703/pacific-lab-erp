@@ -12,6 +12,7 @@ import {
   FlaskConical,
   LayoutDashboard,
   Menu,
+  MessagesSquare,
   X,
 } from "lucide-react";
 import { MODULES, type ModuleDef } from "@/modules/registry";
@@ -20,6 +21,7 @@ import { ROLE_LABEL, type Permission, type Role } from "@/lib/permissions";
 
 const ICONS = {
   LayoutDashboard,
+  MessagesSquare,
   FlaskConical,
   ArrowLeftRight,
   Factory,

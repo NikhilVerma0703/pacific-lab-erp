@@ -18,7 +18,7 @@ async function removeFiles(keys: string[]) {
 
 export async function saveProductionAction(
   input: ProductionFormInput,
-  opts: { id?: string; autoSerial?: boolean; autoSlab?: boolean },
+  opts: { id?: string; autoSlab?: boolean },
 ): Promise<ActionResult<{ id: string; serialNo: number; slabNumber: number | null }>> {
   try {
     const user = await requirePermission(opts.id ? "production.edit" : "production.create");
@@ -31,7 +31,6 @@ export async function saveProductionAction(
       id: opts.id,
       data: parsed.data,
       user,
-      autoSerial: !!opts.autoSerial,
       autoSlab: !!opts.autoSlab,
     });
     await removeFiles(r.removedKeys);
@@ -69,8 +68,8 @@ export async function deleteProductionAction(id: string): Promise<ActionResult> 
   }
 }
 
-/** Fresh S.No. / Slab suggestions after a save, without reloading the page. */
-export async function nextProductionNumbersAction() {
-  await requirePermission("production.create");
-  return suggestProductionNumbers();
+/** S.No. and starting Slab Number for a date (the form asks when its Date changes, and after a save). */
+export async function nextProductionNumbersAction(date?: string, excludeId?: string) {
+  await requirePermission(excludeId ? "production.edit" : "production.create");
+  return suggestProductionNumbers(date, excludeId);
 }

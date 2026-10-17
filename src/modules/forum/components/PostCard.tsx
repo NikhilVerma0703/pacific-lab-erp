@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { cn, formatDateTime } from "@/lib/utils";
 import { addForumReplyAction, setForumPostStatusAction } from "../actions";
 import type { PostStatus } from "../kinds";
+import { postHeading } from "../schema";
 import type { ForumPostDTO, ForumReplyDTO } from "../queries";
 import { Avatar, KindBadge, StatusControl, sameName } from "./forum-ui";
 
@@ -29,16 +30,12 @@ export interface PostCardPermissions {
 export function PostCard({
   post,
   perms,
-  name,
-  onName,
   onEdit,
   onRemove,
   onRemoveReply,
 }: {
   post: ForumPostDTO;
   perms: PostCardPermissions;
-  name: string;
-  onName: (n: string) => void;
   onEdit: () => void;
   onRemove: () => void;
   onRemoveReply: (r: ForumReplyDTO) => void;
@@ -48,6 +45,7 @@ export function PostCard({
   const [expanded, setExpanded] = useState(false);
   const [replying, setReplying] = useState(false);
 
+  const heading = postHeading(post);
   const count = post.replies.length;
   const shown = expanded ? post.replies : post.replies.slice(-VISIBLE_REPLIES);
   const hidden = count - shown.length;
@@ -65,7 +63,8 @@ export function PostCard({
 
   return (
     <article
-      aria-labelledby={`post-${post.id}-title`}
+      aria-labelledby={post.title.trim() ? `post-${post.id}-title` : undefined}
+      aria-label={post.title.trim() ? undefined : heading}
       data-post-id={post.id}
       className={cn("card overflow-hidden", post.important && post.status !== "COMPLETED" && "border-l-4 border-l-bad-fg")}
     >
@@ -81,10 +80,10 @@ export function PostCard({
           </div>
           {perms.canChangePost && (
             <div className="-mt-1 -mr-2 flex shrink-0">
-              <button type="button" className="icon-btn size-9" onClick={onEdit} aria-label={`Edit post ${post.title}`}>
+              <button type="button" className="icon-btn size-9" onClick={onEdit} aria-label={`Edit post ${heading}`}>
                 <Pencil className="size-4" />
               </button>
-              <button type="button" className="icon-btn size-9 text-bad-fg" onClick={onRemove} aria-label={`Remove post ${post.title}`}>
+              <button type="button" className="icon-btn size-9 text-bad-fg" onClick={onRemove} aria-label={`Remove post ${heading}`}>
                 <Trash2 className="size-4" />
               </button>
             </div>
@@ -104,14 +103,16 @@ export function PostCard({
             status={post.status}
             editable={perms.canStatus}
             busy={statusPending}
-            label={`Status of ${post.title}`}
+            label={`Status of ${heading}`}
             onChange={changeStatus}
           />
         </div>
 
-        <h3 id={`post-${post.id}-title`} className="mt-3 text-[17px] leading-snug font-bold tracking-tight break-words">
-          {post.title}
-        </h3>
+        {post.title.trim() && (
+          <h3 id={`post-${post.id}-title`} className="mt-3 text-[17px] leading-snug font-bold tracking-tight break-words">
+            {post.title}
+          </h3>
+        )}
         <p className="mt-1.5 text-[15px] leading-relaxed break-words whitespace-pre-wrap text-ink-2">{post.message}</p>
       </div>
 
@@ -128,7 +129,7 @@ export function PostCard({
         )}
         <span className="flex-1" />
         {perms.canReply && !replying && (
-          <button type="button" className="btn-ghost btn-sm text-brand-2" onClick={() => setReplying(true)} aria-label={`Reply to ${post.title}`}>
+          <button type="button" className="btn-ghost btn-sm text-brand-2" onClick={() => setReplying(true)} aria-label={`Reply to ${heading}`}>
             <Reply className="size-4" /> Reply
           </button>
         )}
@@ -136,7 +137,7 @@ export function PostCard({
 
       {/* ── Replies ───────────────────────────────────────────────────── */}
       {(count > 0 || replying) && (
-        <div className="border-t border-line bg-shell px-4 py-4 sm:px-5" aria-label={`Replies to ${post.title}`}>
+        <div className="border-t border-line bg-shell px-4 py-4 sm:px-5" aria-label={`Replies to ${heading}`}>
           {hidden > 0 && (
             <button type="button" className="mb-3 text-[13px] font-semibold text-brand-2 hover:underline" onClick={() => setExpanded(true)}>
               Show {hidden} earlier {hidden === 1 ? "reply" : "replies"}
@@ -164,9 +165,7 @@ export function PostCard({
           {replying && (
             <ReplyComposer
               postId={post.id}
-              postTitle={post.title}
-              name={name}
-              onName={onName}
+              postTitle={heading}
               onDone={() => {
                 setReplying(false);
                 setExpanded(false);
@@ -213,30 +212,28 @@ function ReplyItem({ reply, byAuthor, onRemove }: { reply: ForumReplyDTO; byAuth
 function ReplyComposer({
   postId,
   postTitle,
-  name,
-  onName,
   onDone,
   className,
 }: {
   postId: string;
   postTitle: string;
-  name: string;
-  onName: (n: string) => void;
   onDone: () => void;
   className?: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [message, setMessage] = useState("");
-  const [typedName, setTypedName] = useState(name);
-  const [changingName, setChangingName] = useState(!name);
+  // Every reply asks for the person's name — never pre-filled.
+  const [who, setWho] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const askName = changingName || !name;
-  const who = askName ? typedName : name;
 
   function submit(e?: React.FormEvent) {
     e?.preventDefault();
     if (pending) return;
+    if (!who.trim()) {
+      setErrors({ authorName: "Enter your name." });
+      return;
+    }
     start(async () => {
       const r = await addForumReplyAction(postId, { message, authorName: who });
       if (!r.ok) {
@@ -244,9 +241,9 @@ function ReplyComposer({
         if (!r.fieldErrors) toast.error(r.error);
         return;
       }
-      onName(who);
       toast.success(r.message ?? "Reply posted.");
       setMessage("");
+      setWho("");
       setErrors({});
       onDone();
       router.refresh();
@@ -258,42 +255,29 @@ function ReplyComposer({
     <form onSubmit={submit} className={cn("flex gap-2.5", className)} aria-label={`Reply to ${postTitle}`}>
       <Avatar name={who || "?"} tone="accent" size="sm" />
       <div className="min-w-0 flex-1 space-y-2">
-        {askName ? (
-          <div>
-            <label htmlFor={`${idBase}-name`} className="label">
-              Your name
-            </label>
-            <input
-              id={`${idBase}-name`}
-              className={cn("input sm:max-w-xs", errors.authorName && "input-error")}
-              autoComplete="name"
-              maxLength={80}
-              value={typedName}
-              onChange={(e) => setTypedName(e.target.value)}
-              autoFocus={!name}
-            />
-            {errors.authorName && (
-              <p className="mt-1 text-[13px] text-bad-fg" role="alert">
-                {errors.authorName}
-              </p>
-            )}
-          </div>
-        ) : (
-          <p className="text-[13px] text-ink-2">
-            Replying as <span className="font-semibold text-ink">{name}</span>
-            <span className="text-ink-3"> · </span>
-            <button
-              type="button"
-              className="font-semibold text-brand-2 hover:underline"
-              onClick={() => {
-                setTypedName(name);
-                setChangingName(true);
-              }}
-            >
-              Change
-            </button>
-          </p>
-        )}
+        <div>
+          <label htmlFor={`${idBase}-name`} className="label">
+            Your name <span className="text-bad-fg">*</span>
+          </label>
+          <input
+            id={`${idBase}-name`}
+            className={cn("input sm:max-w-xs", errors.authorName && "input-error")}
+            autoComplete="off"
+            maxLength={80}
+            aria-required="true"
+            value={who}
+            onChange={(e) => {
+              setWho(e.target.value);
+              if (errors.authorName) setErrors((prev) => ({ ...prev, authorName: "" }));
+            }}
+            autoFocus
+          />
+          {errors.authorName && (
+            <p className="mt-1 text-[13px] text-bad-fg" role="alert">
+              {errors.authorName}
+            </p>
+          )}
+        </div>
         <div>
           <label htmlFor={`${idBase}-msg`} className="sr-only">
             Reply
@@ -309,7 +293,6 @@ function ReplyComposer({
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) submit();
             }}
-            autoFocus={!!name}
           />
           {errors.message && (
             <p className="mt-1 text-[13px] text-bad-fg" role="alert">

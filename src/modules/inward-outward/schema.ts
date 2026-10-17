@@ -97,11 +97,11 @@ export function visibleInwardInput(input: InwardFormInput): InwardFormInput {
 }
 
 /** A blank form with the suggested numbers and today's date. */
-export function newInwardInput(args: { serialNo: number; slabNumber: number; today: string }): InwardFormInput {
+export function newInwardInput(args: { serialNo: number; slabNumber: number | null; today: string }): InwardFormInput {
   return {
     entryDate: args.today,
     serialNo: String(args.serialNo),
-    slabNumber: String(args.slabNumber),
+    slabNumber: args.slabNumber === null ? "" : String(args.slabNumber),
     company: null,
     designName: null,
     plainBody: "",

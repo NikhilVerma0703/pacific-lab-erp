@@ -34,6 +34,7 @@ export default async function EditProductionPage({ params }: { params: Promise<{
       <ProductionForm
         key={s.updatedAt}
         mode="edit"
+        numbers={{ serialNo: s.serialNo, slabNumber: s.slabNumber, first: false }}
         entryId={s.id}
         defaults={toProductionFormInput(s)}
         attachments={s.attachments}

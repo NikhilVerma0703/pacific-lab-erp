@@ -11,12 +11,15 @@ import { productionFormPermissions } from "@/modules/production/page-helpers";
 import { getProductionRegister, REGISTER_PAGE_SIZE } from "@/modules/production/queries";
 import { newProductionInput } from "@/modules/production/schema";
 import { maxUploadMb } from "@/lib/uploads";
+import { ensureRecordStores } from "@/modules/records/sync";
 
 export const metadata = { title: "Production Sample" };
 export const dynamic = "force-dynamic";
 
 export default async function ProductionSamplePage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   const user = await requireUser();
+  // Saved data follows the current rules (S.No. per date) — once per server start.
+  await ensureRecordStores();
   if (!can(user, "production.view")) notFound();
   const canCreate = can(user, "production.create");
   const { page } = await searchParams;
@@ -33,6 +36,7 @@ export default async function ProductionSamplePage({ searchParams }: { searchPar
       {canCreate ? (
         <ProductionForm
           mode="create"
+          numbers={numbers}
           defaults={newProductionInput({ ...numbers, today: plantToday() })}
           attachments={[]}
           options={options}

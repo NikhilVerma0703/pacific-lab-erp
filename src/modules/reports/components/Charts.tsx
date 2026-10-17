@@ -175,16 +175,16 @@ export function DesignChart({ data }: { data: ReportData }) {
   const longest = Math.max(0, ...rows.map((r) => r.pattern.length));
   return (
     <ChartCard
-      title="Design Analysis"
+      title="Design Type Analysis"
       description={
         <>
-          Samples per design pattern, highest first. A sample with several patterns counts once for each. A sample without its own design uses the one recorded in Inward / Outward.
-          {data.totals.withoutDesign > 0 && ` ${data.totals.withoutDesign} sample(s) have no design recorded yet.`}
+          Lab Samples and Inward / Outward samples per design type over the whole period, highest first. A record with several design types counts once under each.
+          {data.totals.withoutDesign > 0 && ` ${data.totals.withoutDesign} record(s) have no design recorded.`}
         </>
       }
-      empty={rows.length === 0 ? <EmptyChart>No designs recorded in this period.</EmptyChart> : undefined}
+      empty={rows.length === 0 ? <EmptyChart>No design types recorded in this period.</EmptyChart> : undefined}
       chart={
-        <div style={{ height }} role="img" aria-label="Horizontal bar chart of samples per design pattern">
+        <div style={{ height }} role="img" aria-label="Horizontal bar chart of samples per design type">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 40, bottom: 4, left: 8 }} barCategoryGap="28%">
               <CartesianGrid stroke={GRID} horizontal={false} />
@@ -218,7 +218,7 @@ export function DesignChart({ data }: { data: ReportData }) {
         <table className="w-full text-[14px]">
           <thead>
             <tr>
-              <th className="th">Design Pattern</th>
+              <th className="th">Design Type</th>
               <th className="th text-right">Samples</th>
             </tr>
           </thead>
@@ -271,7 +271,7 @@ export function ConsumptionChart({ data }: { data: ReportData }) {
   return (
     <ChartCard
       title="Material Consumption"
-      description="Weight used per date across all formulations (main body and Roy Bodies), stacked by material"
+      description="Weight used per date across all bodies (regular, Roy and Chessboard bodies), stacked by material"
       controls={selector}
       kpi={
         <div className="mb-4 flex flex-wrap items-end gap-x-8 gap-y-3 px-1">

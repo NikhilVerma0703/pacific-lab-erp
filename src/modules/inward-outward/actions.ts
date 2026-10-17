@@ -18,7 +18,7 @@ async function removeFiles(keys: string[]) {
 
 export async function saveInwardAction(
   input: InwardFormInput,
-  opts: { id?: string; autoSerial?: boolean; autoSlab?: boolean },
+  opts: { id?: string; autoSlab?: boolean },
 ): Promise<ActionResult<{ id: string; serialNo: number; slabNumber: number | null }>> {
   try {
     const user = await requirePermission(opts.id ? "inward.edit" : "inward.create");
@@ -27,7 +27,7 @@ export async function saveInwardAction(
     const parsed = inwardFormSchema.safeParse(visibleInwardInput(input));
     if (!parsed.success) return fail("Some values are not valid — see the highlighted fields.", fieldErrorsOf(parsed.error.issues));
 
-    const r = await saveInward({ id: opts.id, data: parsed.data, user, autoSerial: !!opts.autoSerial, autoSlab: !!opts.autoSlab });
+    const r = await saveInward({ id: opts.id, data: parsed.data, user, autoSlab: !!opts.autoSlab });
     await removeFiles(r.removedKeys);
     revalidatePath(PATH);
     revalidatePath("/dashboard");
@@ -63,8 +63,8 @@ export async function deleteInwardAction(id: string): Promise<ActionResult> {
   }
 }
 
-/** Fresh S.No. / Slab suggestions after a save, without reloading the page. */
-export async function nextInwardNumbersAction() {
-  await requirePermission("inward.create");
-  return suggestInwardNumbers();
+/** S.No. and starting Slab Number for a date (the form asks when its Date changes, and after a save). */
+export async function nextInwardNumbersAction(date?: string, excludeId?: string) {
+  await requirePermission(excludeId ? "inward.edit" : "inward.create");
+  return suggestInwardNumbers(date, excludeId);
 }

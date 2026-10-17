@@ -9,12 +9,13 @@ import { compareLabels, normalizeKey } from "@/lib/normalize";
 export const REPORT_RANGES = [7, 15, 30] as const;
 export type ReportRange = (typeof REPORT_RANGES)[number];
 
-export type MaterialKind = "RESIN" | "GRIT" | "FILLER" | "PIGMENT";
+export type MaterialKind = "RESIN" | "GRIT" | "FILLER" | "PIGMENT" | "ADDITIVE";
 export const MATERIAL_KINDS: { kind: MaterialKind; label: string }[] = [
   { kind: "RESIN", label: "Resin" },
   { kind: "GRIT", label: "Grits" },
   { kind: "FILLER", label: "Filler" },
   { kind: "PIGMENT", label: "Pigments" },
+  { kind: "ADDITIVE", label: "Additives" },
 ];
 
 /** Most materials drawn as their own stack segment; the rest fold into "Other". */
@@ -23,7 +24,7 @@ export const OTHER = "Other";
 
 export interface ReportSampleRow {
   date: string; // YYYY-MM-DD
-  /** Design names across the sample's bodies: "Plain Body", patterns, or "Non-Plain (no pattern)" — each once. */
+  /** Design types of the lab sample: "Plain Body", or each selected type ("Roy Body", "Carrara" …) — each once. */
   designs: string[];
   components: { kind: MaterialKind; material: string | null; unit: "GRAMS" | "PERCENT" | null; quantity: number | null }[];
 }
@@ -48,10 +49,19 @@ export interface ReportData {
   from: string;
   to: string;
   dates: string[];
-  totals: { samples: number; withoutDesign: number; productionSamples: number };
+  totals: {
+    /** Lab Samples dated in the period. */
+    samples: number;
+    /** Sample Inward / Outward entries dated in the period. */
+    inwardSamples: number;
+    /** Lab samples and inward entries in the period with no design recorded. */
+    withoutDesign: number;
+    productionSamples: number;
+  };
   production: { date: string; count: number }[];
   /** Production Samples (received from the plant) per date, from their Date field. */
   productionSamples: { date: string; count: number }[];
+  /** Design Type Analysis: lab samples + inward entries per design type over the whole period, highest first. */
   designs: { pattern: string; count: number }[];
   consumption: Record<MaterialKind, ConsumptionData>;
 }
@@ -76,8 +86,16 @@ const round = (n: number) => Math.round(n * 1000) / 1000;
 /**
  * @param productionDates the Date (YYYY-MM-DD) of every Production Sample —
  *   one entry per sample; dates outside the window are ignored.
+ * @param inwardRows the Date and design types of every Sample Inward / Outward
+ *   entry — counted in the Design Type Analysis and the Inward / Outward total.
  */
-export function buildReport(rows: ReportSampleRow[], today: string, days: ReportRange, productionDates: string[] = []): ReportData {
+export function buildReport(
+  rows: ReportSampleRow[],
+  today: string,
+  days: ReportRange,
+  productionDates: string[] = [],
+  inwardRows: { date: string; designs: string[] }[] = [],
+): ReportData {
   const dates = dateWindow(today, days);
   const inRange = new Set(dates);
   const samples = rows.filter((r) => inRange.has(r.date));
@@ -90,10 +108,11 @@ export function buildReport(rows: ReportSampleRow[], today: string, days: Report
   const designCounts = new Map<string, { pattern: string; count: number }>();
   let withoutDesign = 0;
 
-  for (const s of samples) {
-    perDate.set(s.date, perDate.get(s.date)! + 1);
+  const inward = inwardRows.filter((r) => inRange.has(r.date));
+  for (const s of samples) perDate.set(s.date, perDate.get(s.date)! + 1);
 
-    // Each sample counts once per design pattern it carries (on any body).
+  for (const s of [...samples, ...inward]) {
+    // Each record counts once under every design type it carries.
     const designs: string[] = [];
     for (const d of s.designs) if (!designs.some((x) => normalizeKey(x) === normalizeKey(d))) designs.push(d);
     if (!designs.length) withoutDesign++;
@@ -162,6 +181,7 @@ export function buildReport(rows: ReportSampleRow[], today: string, days: Report
     dates,
     totals: {
       samples: samples.length,
+      inwardSamples: inward.length,
       withoutDesign,
       productionSamples: productionSamples.reduce((a, d) => a + d.count, 0),
     },

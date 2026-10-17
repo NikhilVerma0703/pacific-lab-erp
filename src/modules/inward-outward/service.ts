@@ -9,10 +9,11 @@ import { readingIsEmpty, type LabReadingData } from "@/modules/forms/fields";
 import { MASTER, type MasterCode } from "@/modules/master-data/catalog";
 import { MasterValueError, resolveMasterRef } from "@/modules/master-data/service";
 import type { MasterRef } from "@/modules/master-data/types";
+import { allocateNumbers, dateOnly } from "@/modules/forms/date-numbering";
 import { otherPatternIds, patternFor } from "@/modules/forms/design-server";
 import type { DesignTypeKey } from "@/modules/forms/design-types";
 import { inwardInclude } from "./include";
-import { lockInwardNumbering, nextInwardSerial, nextInwardSlab } from "./numbering";
+import { inwardNumbering, lockInwardNumbering, renumberInwardDate } from "./numbering";
 import { writeInwardRecord } from "./record-store";
 import type { InwardFormData } from "./schema";
 
@@ -25,7 +26,6 @@ export class InwardSaveError extends Error {
   }
 }
 
-const dateOnly = (s: string) => new Date(`${s}T00:00:00.000Z`);
 
 /**
  * Create or update an Inward / Outward entry in one transaction: Sample
@@ -43,11 +43,10 @@ export async function saveInward(args: {
   id?: string;
   data: InwardFormData;
   user: CurrentUser;
-  /** Create only: allocate S.No. / Slab even if the form carried a value (an untouched suggestion). */
-  autoSerial?: boolean;
+  /** Create only: the form still shows the suggested Slab Number (allocate it again at save). */
   autoSlab?: boolean;
 }): Promise<{ id: string; serialNo: number; slabNumber: number | null; removedKeys: string[] }> {
-  const { id, data, user, autoSerial, autoSlab } = args;
+  const { id, data, user, autoSlab } = args;
   const canOverride = can(user, "inward.overrideNumbers");
   const canAddMaster = can(user, "master.addFromForm");
   const canRemoveFiles = can(user, "attachment.remove");
@@ -77,30 +76,18 @@ export async function saveInward(args: {
           return resolveMasterRef(tx, code, ref, user.id);
         };
 
-        // ── numbers ──────────────────────────────────────────────────────────
-        let serialNo: number;
-        let slabNumber: number | null;
-        if (existing) {
-          serialNo = canOverride && data.serialNo !== null ? data.serialNo : existing.serialNo;
-          // Entries from the earlier form had no Slab Number: they get the next free one.
-          slabNumber = canOverride ? data.slabNumber : (existing.slabNumber ?? (await nextInwardSlab(tx)));
-        } else {
-          serialNo = canOverride && !autoSerial && data.serialNo !== null ? data.serialNo : await nextInwardSerial(tx);
-          slabNumber = canOverride && !autoSlab ? data.slabNumber : await nextInwardSlab(tx);
-        }
-        const fieldErrors: Record<string, string> = {};
-        const notMe = existing ? { NOT: { id: existing.id } } : {};
-        if (await tx.inwardOutwardEntry.findFirst({ where: { serialNo, ...notMe }, select: { id: true } })) {
-          fieldErrors.serialNo = `S.No. ${serialNo} is already used by another entry.`;
-        }
-        if (slabNumber !== null) {
-          const clash = await tx.inwardOutwardEntry.findFirst({ where: { slabNumber, ...notMe }, select: { serialNo: true } });
-          if (clash) fieldErrors.slabNumber = `Slab ${slabNumber} is already used by S.No. ${clash.serialNo}.`;
-        }
+        // ── date and numbers (S.No. 1, 2, 3 … within the date) ──────────────
+        const entryDate = dateOnly(data.entryDate ?? (existing ? existing.entryDate.toISOString().slice(0, 10) : plantToday()));
+        const { serialNo, slabNumber, moved, fieldErrors } = await allocateNumbers(inwardNumbering, tx, {
+          date: entryDate,
+          existing: existing && { id: existing.id, date: existing.entryDate, serialNo: existing.serialNo, slabNumber: existing.slabNumber },
+          typedSlab: data.slabNumber,
+          autoSlab: !!autoSlab,
+          canOverride,
+        });
         if (Object.keys(fieldErrors).length) throw new InwardSaveError("Duplicate number — see the highlighted fields.", fieldErrors);
 
         // ── the entry ────────────────────────────────────────────────────────
-        const entryDate = dateOnly(data.entryDate ?? (existing ? existing.entryDate.toISOString().slice(0, 10) : plantToday()));
         const n = data.numberOfBodies ?? 0;
         const base = {
           serialNo,
@@ -217,6 +204,9 @@ export async function saveInward(args: {
         }
         if (toRemove.length) await tx.sampleAttachment.deleteMany({ where: { id: { in: toRemove.map((a) => a.id) } } });
 
+        // Moved to another date: close the gap it left there.
+        if (moved) for (const eid of await renumberInwardDate(tx, existing!.entryDate)) await writeInwardRecord(tx, eid);
+
         // ── Sample Inward / Outward Database: the complete copy of this entry ─
         await writeInwardRecord(tx, entry.id);
 
@@ -257,7 +247,10 @@ export async function deleteInward(id: string, user: CurrentUser): Promise<{ ser
       snapshot: JSON.parse(JSON.stringify(snapshot)) as Prisma.InputJsonValue,
       userId: user.id,
     });
+    await lockInwardNumbering(tx);
     await tx.inwardOutwardEntry.delete({ where: { id } }); // design, readings, files and its database copy cascade
+    // S.No. of that date stay 1 … k.
+    for (const eid of await renumberInwardDate(tx, snapshot.entryDate)) await writeInwardRecord(tx, eid);
     return { serialNo: snapshot.serialNo, removedKeys: snapshot.attachments.map((a) => a.storageKey) };
   });
 }

@@ -103,11 +103,11 @@ export function visibleLabInput(input: LabFormInput): LabFormInput {
 }
 
 /** A blank form with the suggested numbers and today's date. */
-export function newLabInput(args: { serialNo: number; slabNumber: number; today: string }): LabFormInput {
+export function newLabInput(args: { serialNo: number; slabNumber: number | null; today: string }): LabFormInput {
   return {
     sampleDate: args.today,
     serialNo: String(args.serialNo),
-    slabNumber: String(args.slabNumber),
+    slabNumber: args.slabNumber === null ? "" : String(args.slabNumber),
     designName: null,
     plainBody: "",
     designTypes: [],

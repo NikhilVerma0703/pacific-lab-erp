@@ -163,8 +163,8 @@ enum MeasurementUnit {
 
 model LabSample {
   id                    String          @id @default(cuid())
-  /// S.No. — sequential, unique, assigned by the server.
-  serialNo              Int             @unique
+  /// S.No. — 1, 2, 3 … within each date, assigned by the server.
+  serialNo              Int
   /// Slab number — suggested as the next free number, unique when present.
   slabNumber            Int?            @unique
   sampleDate            DateTime        @db.Date
@@ -209,6 +209,8 @@ model LabSample {
   /// Lab Sample Database: the complete copy of this sample.
   record         LabSampleRecord?
 
+  /// S.No. runs 1, 2, 3 … within each date.
+  @@unique([sampleDate, serialNo])
   @@index([sampleDate])
   @@index([status])
   @@index([createdAt])
@@ -559,7 +561,7 @@ model SampleAttachment {
 model InwardOutwardEntry {
   id                     String          @id @default(cuid())
   /// Serial number — sequential, unique, assigned by the server.
-  serialNo               Int             @unique
+  serialNo               Int
   /// The entry's date (defaults to the day it is recorded; can be changed).
   entryDate              DateTime        @default(now()) @db.Date
   labSampleId            String?         @unique
@@ -604,6 +606,8 @@ model InwardOutwardEntry {
   /// Sample Output files.
   attachments    SampleAttachment[]
 
+  /// S.No. runs 1, 2, 3 … within each date.
+  @@unique([entryDate, serialNo])
   @@index([companyId])
   @@index([designNameId])
   @@index([entryDate])
@@ -744,8 +748,8 @@ model InwardDesignColour {
 /// readings. Own S.No. / Slab Number series, separate from lab samples.
 model ProductionSample {
   id                String          @id @default(cuid())
-  /// S.No. — sequential, unique, assigned by the server.
-  serialNo          Int             @unique
+  /// S.No. — 1, 2, 3 … within each date, assigned by the server.
+  serialNo          Int
   /// Slab number — suggested as the next free number, unique when present.
   slabNumber        Int?            @unique
   sampleDate        DateTime        @db.Date
@@ -777,6 +781,8 @@ model ProductionSample {
   /// their entry-level design applies to every body.
   bodies         ProductionBody[]
 
+  /// S.No. runs 1, 2, 3 … within each date.
+  @@unique([sampleDate, serialNo])
   @@index([sampleDate])
   @@index([createdAt])
   @@index([designNameId])

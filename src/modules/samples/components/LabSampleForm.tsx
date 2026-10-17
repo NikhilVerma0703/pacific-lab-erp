@@ -7,6 +7,7 @@ import { useEffect, useState, useTransition } from "react";
 import { Controller, FormProvider, useForm, useFormContext, useWatch, type Resolver } from "react-hook-form";
 import { toast } from "sonner";
 import { ColourQuantityFields } from "@/components/forms/ColourQuantityFields";
+import { DateNumberFields, type DateNumbers } from "@/components/forms/DateNumberFields";
 import { errorAt } from "@/components/forms/errors";
 import { MaterialBodiesFields } from "@/components/forms/MaterialDetailsFields";
 import { StageRowsFields } from "@/components/forms/StageRowsFields";
@@ -61,6 +62,7 @@ export function LabSampleForm({
   attachments: initialFiles,
   options,
   designNameOptions,
+  numbers: initialNumbers,
   permissions,
   maxUploadMb,
 }: {
@@ -73,11 +75,16 @@ export function LabSampleForm({
   designNameOptions: MasterOption[];
   permissions: LabFormPermissions;
   maxUploadMb: number;
+  /** S.No. / Slab Number for the date in `defaults` (from the saved records). */
+  numbers: DateNumbers;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [files, setFiles] = useState<AttachmentDTO[]>(initialFiles);
   const [baseline, setBaseline] = useState(defaults);
+  // S.No. / Slab Number the server suggested for the form's date.
+  const [numbers, setNumbers] = useState<DateNumbers>(initialNumbers);
+  const [numbersKey, setNumbersKey] = useState(0);
   const [confirm, setConfirm] = useState<null | "reset" | "cancel">(null);
   const env: Env = { options, allowCustom: permissions.addMaster };
 
@@ -120,8 +127,7 @@ export function LabSampleForm({
           // saving at once never collide on a stale suggestion.
           const r = await saveLabSampleAction(raw, {
             id: sampleId,
-            autoSerial: mode === "create" && raw.serialNo === baseline.serialNo,
-            autoSlab: mode === "create" && raw.slabNumber === baseline.slabNumber,
+            autoSlab: mode === "create" && numbers.slabNumber !== null && String(raw.slabNumber) === String(numbers.slabNumber),
           });
           if (!r.ok) {
             toast.error(r.error);
@@ -137,9 +143,12 @@ export function LabSampleForm({
             return;
           }
           // New sample: clear the form and suggest the next numbers.
-          const next = await nextLabNumbersAction();
-          const fresh = { ...baseline, serialNo: String(next.serialNo), slabNumber: String(next.slabNumber), sampleDate: getValues("sampleDate") };
+          const day = String(getValues("sampleDate") ?? "");
+          const next = await nextLabNumbersAction(day);
+          const fresh = { ...baseline, sampleDate: day, serialNo: String(next.serialNo), slabNumber: next.slabNumber === null ? "" : String(next.slabNumber) };
           setBaseline(fresh);
+          setNumbers(next);
+          setNumbersKey((k) => k + 1);
           reset(fresh);
           setFiles([]);
           router.refresh();
@@ -174,21 +183,17 @@ export function LabSampleForm({
         {/* Basic Information */}
         <FormSection index={next()} title="Basic Information">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <Field label="Date" htmlFor="lab-date" error={errorAt(errors, "sampleDate")}>
-              <input
-                id="lab-date"
-                type="date"
-                readOnly={!permissions.changeDate}
-                className={cn("input", !permissions.changeDate && "pointer-events-none bg-mute-bg text-ink-2", errorAt(errors, "sampleDate") && "input-error")}
-                {...register("sampleDate")}
-              />
-            </Field>
-            <Field label="S.No." htmlFor="lab-serialNo" error={errorAt(errors, "serialNo")}>
-              <NumberBox id="lab-serialNo" name="serialNo" editable={permissions.overrideNumbers} invalid={!!errorAt(errors, "serialNo")} />
-            </Field>
-            <Field label="Slab Number" htmlFor="lab-slabNumber" error={errorAt(errors, "slabNumber")}>
-              <NumberBox id="lab-slabNumber" name="slabNumber" editable={permissions.overrideNumbers} invalid={!!errorAt(errors, "slabNumber")} />
-            </Field>
+            <DateNumberFields
+              key={numbersKey}
+              idPrefix="lab"
+              dateName="sampleDate"
+              mode={mode}
+              initial={numbers}
+              fetchNumbers={(d) => nextLabNumbersAction(d, sampleId)}
+              onNumbers={setNumbers}
+              canChangeDate={permissions.changeDate}
+              canOverride={permissions.overrideNumbers}
+            />
             <Field label="Design Name" htmlFor="lab-designName" error={errorAt(errors, "designName.label")}>
               <Controller
                 control={control}
@@ -461,20 +466,6 @@ function measurementsSummary(l: DesignLayout): string | undefined {
   if (l.royN) parts.push(`${l.royN} Roy Bod${l.royN === 1 ? "y" : "ies"}`);
   if (l.chessN) parts.push(`${l.chessN} Chessboard Bod${l.chessN === 1 ? "y" : "ies"}`);
   return parts.length ? `${parts.join(" · ")} — Post Press and Post Polish L, a, b for each` : undefined;
-}
-
-/** S.No. / Slab Number — suggested by the system; typed over only by roles allowed to. */
-function NumberBox({ id, name, editable, invalid }: { id: string; name: "serialNo" | "slabNumber"; editable: boolean; invalid: boolean }) {
-  const { register } = useFormContext<LabFormInput>();
-  return (
-    <input
-      id={id}
-      inputMode="numeric"
-      readOnly={!editable}
-      className={cn("input tabular-nums", !editable && "bg-mute-bg text-ink-2", invalid && "input-error")}
-      {...register(name)}
-    />
-  );
 }
 
 function ReadingGroup({ title, hint, n, tone = "brand", children }: { title: string; hint: string; n: number; tone?: "brand" | "accent"; children: React.ReactNode }) {

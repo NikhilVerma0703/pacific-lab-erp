@@ -15,7 +15,7 @@ export interface ModuleDef {
   label: string;
   href: string;
   /** lucide-react icon name, resolved in the shell. */
-  icon: "LayoutDashboard" | "FlaskConical" | "ArrowLeftRight" | "Factory" | "BarChart3" | "Download" | "Database";
+  icon: "LayoutDashboard" | "MessagesSquare" | "FlaskConical" | "ArrowLeftRight" | "Factory" | "BarChart3" | "Download" | "Database";
   description: string;
   permission: Permission;
   status: ModuleStatus;
@@ -27,8 +27,17 @@ export const MODULES: ModuleDef[] = [
     label: "Dashboard",
     href: "/dashboard",
     icon: "LayoutDashboard",
-    description: "Today, overall totals and the Forum",
+    description: "Today's and overall totals",
     permission: "dashboard.view",
+    status: "live",
+  },
+  {
+    key: "forum",
+    label: "Forum",
+    href: "/forum",
+    icon: "MessagesSquare",
+    description: "Announcements, posts and replies",
+    permission: "forum.view",
     status: "live",
   },
   {
@@ -45,7 +54,7 @@ export const MODULES: ModuleDef[] = [
     label: "Sample Inward / Outward",
     href: "/inward-outward",
     icon: "ArrowLeftRight",
-    description: "Physical samples received / sent, and Rectification",
+    description: "Physical samples received / sent",
     permission: "inward.view",
     status: "live",
   },

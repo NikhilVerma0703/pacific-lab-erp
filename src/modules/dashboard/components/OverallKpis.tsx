@@ -1,5 +1,4 @@
 import {
-  Factory,
   FlaskConical,
   Layers,
   Microscope,
@@ -10,7 +9,7 @@ import { cn } from "@/lib/utils";
 import type { DashboardData } from "../queries";
 
 export function OverallKpis({ data }: { data: DashboardData["overall"] }) {
-  // Five cards in whole rows: Total Samples spans two columns on phones (2, then 2 + 2) and tablets (2 + 1, then 3); one row of five on wide screens.
+  // Four cards: two rows of two on phones, one row of four from tablets up.
   const cards: {
     label: string;
     value: number;
@@ -24,7 +23,6 @@ export function OverallKpis({ data }: { data: DashboardData["overall"] }) {
       value: data.totalSamples,
       icon: <Layers className="size-4" />,
       href: "/samples",
-      wide: true,
     },
     {
       label: "Total Lab Samples",
@@ -36,7 +34,8 @@ export function OverallKpis({ data }: { data: DashboardData["overall"] }) {
       label: "Total Line Samples",
       value: data.line,
       icon: <Workflow className="size-4" />,
-      note: "Not recorded yet",
+      href: "/production-sample#register",
+      note: "Production Samples",
     },
     {
       label: "Total Designs Worked On",
@@ -44,15 +43,9 @@ export function OverallKpis({ data }: { data: DashboardData["overall"] }) {
       icon: <Microscope className="size-4" />,
       href: "/reports?range=30",
     },
-    {
-      label: "Total Production Samples",
-      value: data.production,
-      icon: <Factory className="size-4" />,
-      href: "/production-sample#register",
-    },
   ];
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
       {cards.map((c) => {
         const body = (
           <>
