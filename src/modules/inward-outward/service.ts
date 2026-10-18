@@ -43,10 +43,11 @@ export async function saveInward(args: {
   id?: string;
   data: InwardFormData;
   user: CurrentUser;
-  /** Create only: the form still shows the suggested Slab Number (allocate it again at save). */
+  /** Create only: the form still shows the suggested S.No. / Slab Number (allocate them again at save). */
+  autoSerial?: boolean;
   autoSlab?: boolean;
-}): Promise<{ id: string; serialNo: number; slabNumber: number | null; removedKeys: string[] }> {
-  const { id, data, user, autoSlab } = args;
+}): Promise<{ id: string; serialNo: number; slabNumber: number | null; notes: string[]; removedKeys: string[] }> {
+  const { id, data, user, autoSerial, autoSlab } = args;
   const canOverride = can(user, "inward.overrideNumbers");
   const canAddMaster = can(user, "master.addFromForm");
   const canRemoveFiles = can(user, "attachment.remove");
@@ -78,14 +79,18 @@ export async function saveInward(args: {
 
         // ── date and numbers (S.No. 1, 2, 3 … within the date) ──────────────
         const entryDate = dateOnly(data.entryDate ?? (existing ? existing.entryDate.toISOString().slice(0, 10) : plantToday()));
-        const { serialNo, slabNumber, moved, fieldErrors } = await allocateNumbers(inwardNumbering, tx, {
+        const { serialNo, slabNumber, moved, reordered, notes, fieldErrors } = await allocateNumbers(inwardNumbering, tx, {
           date: entryDate,
           existing: existing && { id: existing.id, date: existing.entryDate, serialNo: existing.serialNo, slabNumber: existing.slabNumber },
+          typedSerial: data.serialNo,
+          autoSerial: !!autoSerial,
           typedSlab: data.slabNumber,
           autoSlab: !!autoSlab,
           canOverride,
         });
         if (Object.keys(fieldErrors).length) throw new InwardSaveError("Duplicate number — see the highlighted fields.", fieldErrors);
+        // Records the typed S.No. pushed down keep their copies in step.
+        for (const eid of reordered) await writeInwardRecord(tx, eid);
 
         // ── the entry ────────────────────────────────────────────────────────
         const n = data.numberOfBodies ?? 0;
@@ -219,7 +224,7 @@ export async function saveInward(args: {
           userId: user.id,
         });
 
-        return { id: entry.id, serialNo, slabNumber, removedKeys: toRemove.map((a) => a.storageKey) };
+        return { id: entry.id, serialNo, slabNumber, notes, removedKeys: toRemove.map((a) => a.storageKey) };
       },
       { timeout: 20_000, maxWait: 10_000 },
     )

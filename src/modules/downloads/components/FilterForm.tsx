@@ -1,6 +1,6 @@
 "use client";
 
-import { Filter, RotateCcw } from "lucide-react";
+import { RotateCcw, Search } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Field } from "@/components/ui/Field";
@@ -44,7 +44,7 @@ export function FilterForm({
   return (
     <form
       method="get"
-      action="/downloads#filtered"
+      action="/downloads#results"
       className="space-y-4"
       noValidate
       onSubmit={(e) => {
@@ -101,7 +101,7 @@ export function FilterForm({
       </div>
       <div className="flex flex-wrap gap-2">
         <button type="submit" className="btn-primary">
-          <Filter className="size-4" /> Apply
+          <Search className="size-4" /> Search
         </button>
         <Link href="/downloads#filtered" className="btn-ghost">
           <RotateCcw className="size-4" /> Clear filters

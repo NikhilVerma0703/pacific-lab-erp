@@ -24,7 +24,7 @@ type Cell = string | number | Date | null | undefined;
 
 export interface Col<T> {
   header: string;
-  /** Group heading shown above the column (merged across the group). */
+  /** Section heading shown above the column (merged across the section). */
   group?: string;
   width?: number;
   kind?: "date" | "datetime" | "number" | "text";
@@ -33,69 +33,136 @@ export interface Col<T> {
 
 const BRAND = "FF1F3A5F";
 const GROUP_FILL = "FFE6EEF7";
+const STRIPE_FILL = "FFF6F9FC";
+const LINE = "FFD9E2EC";
+const MUTED = "FF7A8896";
 const NO_RECORDS = "No records for the selected Production Date.";
 
-function addSheet<T>(wb: ExcelJS.Workbook, name: string, cols: Col<T>[], rows: T[], opts: { emptyNote?: string } = {}) {
-  const ws = wb.addWorksheet(name);
-  const grouped = cols.some((c) => c.group);
-  ws.columns = cols.map((c) => ({ width: c.width ?? Math.min(40, Math.max(12, c.header.length + 4)) }));
+const thin = { style: "thin" as const, color: { argb: LINE } };
+const box = { top: thin, left: thin, bottom: thin, right: thin };
 
-  if (grouped) {
+/** The report's name and what it covers, above the table. */
+interface SheetHead {
+  title: string;
+  subtitle?: string;
+}
+
+/**
+ * One table per sheet, the same everywhere: title and period on top, the
+ * form's sections as a merged heading row, the fields under them, then one
+ * row per record. Headers stay on screen and when printed, the table filters
+ * and sorts, dates and numbers carry their formats, and the first columns
+ * (Date, S.No., Slab Number) stay in view while scrolling sideways.
+ */
+function addSheet<T>(
+  wb: ExcelJS.Workbook,
+  name: string,
+  cols: Col<T>[],
+  rows: T[],
+  opts: { emptyNote?: string; head?: SheetHead; freeze?: number } = {},
+) {
+  const ws = wb.addWorksheet(name, { views: [{ state: "frozen" }] });
+  ws.properties.tabColor = { argb: BRAND };
+  ws.columns = cols.map((c) => ({ width: c.width ?? Math.min(42, Math.max(12, c.header.length + 4)) }));
+  const last = cols.length;
+
+  if (opts.head) {
+    const t = ws.addRow([opts.head.title]);
+    ws.mergeCells(t.number, 1, t.number, last);
+    t.height = 26;
+    t.getCell(1).font = { bold: true, size: 14, color: { argb: BRAND } };
+    t.getCell(1).alignment = { vertical: "middle" };
+    if (opts.head.subtitle) {
+      const sub = ws.addRow([opts.head.subtitle]);
+      ws.mergeCells(sub.number, 1, sub.number, last);
+      sub.height = 18;
+      sub.getCell(1).font = { italic: true, size: 11, color: { argb: MUTED } };
+      sub.getCell(1).alignment = { vertical: "middle" };
+    }
+    ws.addRow([]).height = 6;
+  }
+
+  if (cols.some((c) => c.group)) {
     const g = ws.addRow(cols.map((c) => c.group ?? ""));
+    g.height = 20;
     let start = 0;
-    for (let i = 1; i <= cols.length; i++) {
-      if (i === cols.length || cols[i].group !== cols[start].group) {
-        if (i - start > 1 && cols[start].group) ws.mergeCells(1, start + 1, 1, i);
+    for (let i = 1; i <= last; i++) {
+      if (i === last || cols[i].group !== cols[start].group) {
+        if (i - start > 1 && cols[start].group) ws.mergeCells(g.number, start + 1, g.number, i);
         start = i;
       }
     }
-    g.eachCell((cell) => {
-      cell.font = { bold: true, color: { argb: BRAND } };
+    for (let i = 1; i <= last; i++) {
+      const cell = g.getCell(i);
+      cell.font = { bold: true, size: 11, color: { argb: BRAND } };
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: GROUP_FILL } };
       cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
-    });
+      cell.border = box;
+    }
   }
 
   const h = ws.addRow(cols.map((c) => c.header));
-  h.height = 30;
-  h.eachCell((cell) => {
+  h.height = 34;
+  for (let i = 1; i <= last; i++) {
+    const cell = h.getCell(i);
     cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: BRAND } };
-    cell.alignment = { vertical: "middle", wrapText: true };
-  });
-  const headerRows = grouped ? 2 : 1;
-  ws.views = [{ state: "frozen", ySplit: headerRows, xSplit: 1 }];
+    cell.alignment = { vertical: "middle", horizontal: cols[i - 1].kind === "number" ? "right" : "left", wrapText: true };
+    cell.border = box;
+  }
+  const headerRow = h.number;
+  // Date, S.No. and Slab Number stay in view while scrolling right.
+  ws.views = [{ state: "frozen", ySplit: headerRow, xSplit: Math.min(opts.freeze ?? 3, last) }];
+  ws.pageSetup = {
+    orientation: "landscape",
+    fitToPage: true,
+    fitToWidth: 1,
+    fitToHeight: 0,
+    printTitlesRow: `${headerRow}:${headerRow}`,
+    margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 },
+  };
 
-  for (const r of rows) {
+  rows.forEach((r, n) => {
     const row = ws.addRow(
       cols.map((c) => {
         const v = c.value(r);
         return v === undefined || v === "" ? null : v;
       }),
     );
-    row.alignment = { vertical: "top", wrapText: true };
-    cols.forEach((c, i) => {
-      const cell = row.getCell(i + 1);
+    for (let i = 1; i <= last; i++) {
+      const c = cols[i - 1];
+      const cell = row.getCell(i);
+      cell.alignment = { vertical: "top", wrapText: true, horizontal: c.kind === "number" ? "right" : "left" };
+      cell.border = box;
       if (c.kind === "date") cell.numFmt = "dd-mmm-yyyy";
       if (c.kind === "datetime") cell.numFmt = "dd-mmm-yyyy hh:mm";
-    });
-  }
+      if (c.kind === "number") cell.numFmt = "#,##0.###";
+      if (n % 2 === 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: STRIPE_FILL } };
+    }
+  });
+
   if (rows.length) {
-    ws.autoFilter = { from: { row: headerRows, column: 1 }, to: { row: headerRows, column: cols.length } };
+    ws.autoFilter = { from: { row: headerRow, column: 1 }, to: { row: headerRow, column: last } };
   } else {
-    ws.addRow([opts.emptyNote ?? NO_RECORDS]).font = { italic: true, color: { argb: "FF7A8896" } };
+    const note = ws.addRow([opts.emptyNote ?? NO_RECORDS]);
+    ws.mergeCells(note.number, 1, note.number, last);
+    note.getCell(1).font = { italic: true, color: { argb: MUTED } };
   }
   return ws;
 }
 
-/** Two-column sheet: what was chosen. */
-function addInfoSheet(wb: ExcelJS.Workbook, name: string, pairs: [string, string][]) {
-  const ws = wb.addWorksheet(name);
-  ws.columns = [{ width: 24 }, { width: 44 }];
-  const head = ws.addRow(["Filter", "Value"]);
-  head.font = { bold: true, color: { argb: "FFFFFFFF" } };
-  head.eachCell((c) => (c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: BRAND } }));
-  for (const p of pairs) ws.addRow(p);
+/** Two-column sheet: what the export was asked for. */
+function addInfoSheet(wb: ExcelJS.Workbook, name: string, head: SheetHead, pairs: [string, string][]) {
+  addSheet<[string, string]>(
+    wb,
+    name,
+    [
+      { header: "Filter", width: 26, value: (p) => p[0] },
+      { header: "Value", width: 46, value: (p) => p[1] },
+    ],
+    pairs,
+    { head, freeze: 1 },
+  );
 }
 
 async function finish(wb: ExcelJS.Workbook): Promise<Buffer> {
@@ -104,21 +171,16 @@ async function finish(wb: ExcelJS.Workbook): Promise<Buffer> {
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
+/** "Lab Sample Report" + the Production Date it covers, on every sheet of that file. */
+const headOf = (title: string, period: string, sheet?: string): SheetHead => ({
+  title: sheet ? `${title} — ${sheet}` : title,
+  subtitle: `Production Date: ${period}`,
+});
+
 // ── value helpers ────────────────────────────────────────────────────────────
 
 const num = (v: string | number | null | undefined) => (v === null || v === undefined || v === "" ? null : Number(v));
 const dateOnly = (iso: string | null | undefined) => (iso ? new Date(`${iso.slice(0, 10)}T00:00:00Z`) : null);
-/** Excel has no time zones — write the plant's wall-clock time. */
-const plantDateTime = (iso: string | null | undefined) => {
-  if (!iso) return null;
-  const tz = process.env.APP_TIMEZONE ?? "Asia/Kolkata";
-  const p = Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
-      .formatToParts(new Date(iso))
-      .map((x) => [x.type, x.value]),
-  );
-  return new Date(Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute));
-};
 const yesNo = (b: boolean | null | undefined) => (b === null || b === undefined ? null : b ? "Yes" : "No");
 const labels = (xs: { label: string }[] | undefined) => xs?.map((x) => x.label).join(", ") || null;
 const gm = (q: string | null) => (q === null ? "" : ` ${Number(q)} gm`);
@@ -177,11 +239,18 @@ function readingCols<T>(group: string, stages: { title?: string; get: (r: T) => 
   );
 }
 
-const stageCols = <T>(group: string, get: (r: T) => { postPress: Reading; postPolish: Reading } | null | undefined) =>
-  readingCols<T>(group, [
-    { title: "Post Press", get: (r) => get(r)?.postPress },
-    { title: "Post Polish", get: (r) => get(r)?.postPolish },
+/** Every reading of a record sits under one section, named body by body. */
+const LAB_GROUP = "L, a, b Measurements";
+
+/** Post Press and Post Polish of one body ("Body 1 Post Press L" …). */
+const stageCols = <T>(label: string, get: (r: T) => { postPress: Reading; postPolish: Reading } | null | undefined) =>
+  readingCols<T>(LAB_GROUP, [
+    { title: `${label} Post Press`, get: (r) => get(r)?.postPress },
+    { title: `${label} Post Polish`, get: (r) => get(r)?.postPolish },
   ]);
+
+/** The single reading an Inward / Outward body has ("Body 1 L" …). */
+const singleCols = <T>(label: string, get: (r: T) => Reading) => readingCols<T>(LAB_GROUP, [{ title: label, get }]);
 
 // ── design types (Lab Sample and Inward / Outward) ───────────────────────────
 
@@ -232,17 +301,8 @@ const typesCol = <T>(group: string, get: (r: T) => { plainBody: boolean | null; 
   value: (r) => (get(r).plainBody === false ? get(r).designTypes.map((x) => designType(x.type).label).join(", ") : null),
 });
 
-/** Sample Output, Remarks and who recorded it. */
-function closingCols<T>(get: (r: T) => { attachments: { originalName: string }[]; remarks: string | null; createdBy: string | null; createdAt: string; updatedBy: string | null; updatedAt: string }): Col<T>[] {
-  return [
-    { group: "Sample Output", header: "Output Files", width: 30, value: (r) => get(r).attachments.map((a) => a.originalName).join(", ") },
-    { group: "Remarks", header: "Remarks", width: 36, value: (r) => get(r).remarks },
-    { group: "Record", header: "Created By", width: 16, value: (r) => get(r).createdBy },
-    { group: "Record", header: "Created At", width: 18, kind: "datetime", value: (r) => plantDateTime(get(r).createdAt) },
-    { group: "Record", header: "Last Updated By", width: 16, value: (r) => get(r).updatedBy },
-    { group: "Record", header: "Last Updated At", width: 18, kind: "datetime", value: (r) => plantDateTime(get(r).updatedAt) },
-  ];
-}
+/** The form's last section. Sample Output files and the "who / when" columns are not exported. */
+const remarksCol = <T>(get: (r: T) => string | null): Col<T> => ({ group: "Remarks", header: "Remarks", width: 40, value: (r) => get(r) });
 
 // ── detail sheets (one line per material / colour, per reading) ──────────────
 
@@ -278,7 +338,7 @@ const refCols = <T extends RecordRef>(): Col<T>[] => [
   { header: "Design Name", width: 22, value: (l) => l.designName },
 ];
 
-function materialSheet(wb: ExcelJS.Workbook, name: string, lines: MaterialLine[]) {
+function materialSheet(wb: ExcelJS.Workbook, name: string, head: SheetHead, lines: MaterialLine[]) {
   addSheet<MaterialLine>(
     wb,
     name,
@@ -293,11 +353,11 @@ function materialSheet(wb: ExcelJS.Workbook, name: string, lines: MaterialLine[]
       { header: "Note", width: 16, value: (l) => (l.percent && l.quantity !== null ? `recorded as ${Number(l.quantity)} %` : null) },
     ],
     lines,
-    { emptyNote: "No materials recorded." },
+    { head, emptyNote: "No materials recorded.", freeze: 4 },
   );
 }
 
-function readingSheet(wb: ExcelJS.Workbook, lines: ReadingLine[]) {
+function readingSheet(wb: ExcelJS.Workbook, head: SheetHead, lines: ReadingLine[]) {
   const staged = lines.some((l) => l.stage);
   addSheet<ReadingLine>(
     wb,
@@ -311,7 +371,7 @@ function readingSheet(wb: ExcelJS.Workbook, lines: ReadingLine[]) {
       { header: "b", width: 10, kind: "number", value: (l) => num(l.b) },
     ],
     lines,
-    { emptyNote: "No L, a, b readings recorded." },
+    { head, emptyNote: "No L, a, b readings recorded.", freeze: 4 },
   );
 }
 
@@ -392,17 +452,17 @@ function labCols(samples: SampleDetail[]): Col<SampleDetail>[] {
     { group: DT, header: "Number of Bodies (N)", width: 10, kind: "number", value: (s) => s.numberOfBodies ?? (s.bodies.length || null) },
     ...range(n).flatMap((i) => materialCols<SampleDetail>(`Material Details · Body ${i}`, (s) => ownBodies(s)[i - 1]?.main)),
     ...typeDetailCols<SampleDetail>((s) => s, special),
-    ...range(n).flatMap((i) => stageCols<SampleDetail>(`L, a, b · Body ${i}`, (s) => s.bodies[i - 1])),
-    ...range(roy).flatMap((i) => stageCols<SampleDetail>(`L, a, b · Roy Body ${i}`, (s) => s.royBodies[i - 1])),
-    ...range(chess).flatMap((i) => stageCols<SampleDetail>(`L, a, b · Chessboard Body ${i}`, (s) => s.chessboardBodies[i - 1])),
-    ...closingCols<SampleDetail>((s) => s),
+    ...range(n).flatMap((i) => stageCols<SampleDetail>(`Body ${i}`, (s) => s.bodies[i - 1])),
+    ...range(roy).flatMap((i) => stageCols<SampleDetail>(`Roy Body ${i}`, (s) => s.royBodies[i - 1])),
+    ...range(chess).flatMap((i) => stageCols<SampleDetail>(`Chessboard Body ${i}`, (s) => s.chessboardBodies[i - 1])),
+    remarksCol<SampleDetail>((s) => s.remarks),
   ];
 
   if (samples.some(labEarlier)) {
     const E = "Recorded with the earlier form";
     cols.push(
       { group: E, header: "Saved as", width: 10, value: (s) => (s.status === "DRAFT" ? "Draft" : null) },
-      { group: E, header: "Material Details", width: 26, value: (s) => (s.legacyBodies && s.bodies.length > 1 ? "Recorded once for the whole sample (under Body 1)" : null) },
+      { group: E, header: "Material Details note", width: 26, value: (s) => (s.legacyBodies && s.bodies.length > 1 ? "Recorded once for the whole sample (under Body 1)" : null) },
       { group: E, header: "Physical Sample Available", width: 12, value: (s) => yesNo(s.physicalSamplePresent) },
       { group: E, header: "Inward / Outward S.No.", width: 10, kind: "number", value: (s) => s.inwardEntry?.serialNo },
       {
@@ -493,17 +553,18 @@ function labLines(samples: SampleDetail[]) {
   return { m, r };
 }
 
-function addLabSheets(wb: ExcelJS.Workbook, samples: SampleDetail[], emptyNote?: string) {
-  addSheet<SampleDetail>(wb, "Lab Samples", labCols(samples), samples, { emptyNote });
+function addLabSheets(wb: ExcelJS.Workbook, samples: SampleDetail[], meta: { title: string; period: string; emptyNote?: string }) {
+  const head = (sheet?: string) => headOf(meta.title, meta.period, sheet);
+  addSheet<SampleDetail>(wb, "Lab Samples", labCols(samples), samples, { head: head(), emptyNote: meta.emptyNote });
   const { m, r } = labLines(samples);
-  materialSheet(wb, "Material Details", m);
-  readingSheet(wb, r);
+  materialSheet(wb, "Material Details", head("Material Details"), m);
+  readingSheet(wb, head("L, a, b Measurements"), r);
 }
 
 /** Lab Sample Reports: every Lab Sample form field of the period's samples. */
-export async function labWorkbook(samples: SampleDetail[]): Promise<Buffer> {
+export async function labWorkbook(samples: SampleDetail[], period: string): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
-  addLabSheets(wb, samples, "No lab samples for the selected Production Date.");
+  addLabSheets(wb, samples, { title: "Lab Sample Report", period, emptyNote: "No lab samples for the selected Production Date." });
   return finish(wb);
 }
 
@@ -534,12 +595,10 @@ function inwardCols(entries: InwardDetail[]): Col<InwardDetail>[] {
     typesCol<InwardDetail>(DT, (e) => e),
     { group: DT, header: "Number of Bodies (N)", width: 10, kind: "number", value: (e) => e.numberOfBodies ?? (e.bodies.length || null) },
     ...typeDetailCols<InwardDetail>((e) => e),
-    ...range(n).flatMap((i) => readingCols<InwardDetail>(`L, a, b · Body ${i}`, [{ get: (e) => e.bodies[i - 1]?.lab }])),
-    ...range(roy).flatMap((i) => readingCols<InwardDetail>(`L, a, b · Roy Body ${i}`, [{ get: (e) => (has(e, "ROY_BODY") ? e.royBodies[i - 1] : null) }])),
-    ...range(chess).flatMap((i) =>
-      readingCols<InwardDetail>(`L, a, b · Chessboard Body ${i}`, [{ get: (e) => (has(e, "CHESSBOARD") ? e.chessboardBodies[i - 1] : null) }]),
-    ),
-    ...closingCols<InwardDetail>((e) => e),
+    ...range(n).flatMap((i) => singleCols<InwardDetail>(`Body ${i}`, (e) => e.bodies[i - 1]?.lab)),
+    ...range(roy).flatMap((i) => singleCols<InwardDetail>(`Roy Body ${i}`, (e) => (has(e, "ROY_BODY") ? e.royBodies[i - 1] : null))),
+    ...range(chess).flatMap((i) => singleCols<InwardDetail>(`Chessboard Body ${i}`, (e) => (has(e, "CHESSBOARD") ? e.chessboardBodies[i - 1] : null))),
+    remarksCol<InwardDetail>((e) => e.remarks),
   ];
 
   if (entries.some(inwardEarlier)) {
@@ -585,17 +644,18 @@ function inwardLines(entries: InwardDetail[]) {
   return { m, r };
 }
 
-function addInwardSheets(wb: ExcelJS.Workbook, entries: InwardDetail[], emptyNote?: string) {
-  addSheet<InwardDetail>(wb, "Inward Outward Samples", inwardCols(entries), entries, { emptyNote });
+function addInwardSheets(wb: ExcelJS.Workbook, entries: InwardDetail[], meta: { title: string; period: string; emptyNote?: string }) {
+  const head = (sheet?: string) => headOf(meta.title, meta.period, sheet);
+  addSheet<InwardDetail>(wb, "Inward Outward Samples", inwardCols(entries), entries, { head: head(), emptyNote: meta.emptyNote });
   const { m, r } = inwardLines(entries);
-  materialSheet(wb, "Colors & Materials", m);
-  readingSheet(wb, r);
+  materialSheet(wb, "Colors & Materials", head("Colors & Materials"), m);
+  readingSheet(wb, head("L, a, b Measurements"), r);
 }
 
 /** Sample Inward/Outward Reports: every Inward / Outward form field of the period's entries. */
-export async function inwardWorkbook(entries: InwardDetail[]): Promise<Buffer> {
+export async function inwardWorkbook(entries: InwardDetail[], period: string): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
-  addInwardSheets(wb, entries, "No inward / outward samples for the selected Production Date.");
+  addInwardSheets(wb, entries, { title: "Sample Inward / Outward Report", period, emptyNote: "No inward / outward samples for the selected Production Date." });
   return finish(wb);
 }
 
@@ -609,6 +669,7 @@ const productionEarlier = (p: ProductionDetail) => p.bodies.some((b) => b.design
 
 function productionCols(entries: ProductionDetail[]): Col<ProductionDetail>[] {
   const n = maxOf(entries.map((p) => p.bodies.length));
+  const roy = maxOf(entries.flatMap((p) => productionRoyBodies(p).map((b) => Math.max(b.royBody?.numberOfBodies ?? 0, ...b.royBody!.readings.map((x) => x.bodyIndex)))), 0);
   const BI = "Basic Information";
   const cols: Col<ProductionDetail>[] = [
     { group: BI, header: "Date", width: 13, kind: "date", value: (p) => dateOnly(p.sampleDate) },
@@ -616,8 +677,15 @@ function productionCols(entries: ProductionDetail[]): Col<ProductionDetail>[] {
     { group: BI, header: "Slab Number", width: 12, kind: "number", value: (p) => p.slabNumber },
     { group: BI, header: "Design Name", width: 22, value: (p) => p.designName },
     { group: BI, header: "Number of Bodies (N)", width: 10, kind: "number", value: (p) => p.numberOfBodies ?? (p.bodies.length || null) },
-    ...range(n).flatMap((i) => stageCols<ProductionDetail>(`L, a, b · Body ${i}`, (p) => p.bodies[i - 1])),
-    ...closingCols<ProductionDetail>((p) => p),
+    ...range(n).flatMap((i) => stageCols<ProductionDetail>(`Body ${i}`, (p) => p.bodies[i - 1])),
+    // Roy Body readings of entries saved with the earlier form belong to the same section.
+    ...range(roy).flatMap((k) =>
+      stageCols<ProductionDetail>(`Roy Body ${k}`, (p) => {
+        const list = productionRoyBodies(p)[0]?.royBody?.readings ?? [];
+        return { postPress: list.find((x) => x.stage === "POST_PRESS" && x.bodyIndex === k), postPolish: list.find((x) => x.stage === "POST_POLISH" && x.bodyIndex === k) };
+      }),
+    ),
+    remarksCol<ProductionDetail>((p) => p.remarks),
   ];
   if (entries.some(productionEarlier)) {
     const E = "Recorded with the earlier form";
@@ -656,15 +724,16 @@ function productionLines(entries: ProductionDetail[]): ReadingLine[] {
   return r;
 }
 
-function addProductionSheets(wb: ExcelJS.Workbook, entries: ProductionDetail[], emptyNote?: string) {
-  addSheet<ProductionDetail>(wb, "Production Samples", productionCols(entries), entries, { emptyNote });
-  readingSheet(wb, productionLines(entries));
+function addProductionSheets(wb: ExcelJS.Workbook, entries: ProductionDetail[], meta: { title: string; period: string; emptyNote?: string }) {
+  const head = (sheet?: string) => headOf(meta.title, meta.period, sheet);
+  addSheet<ProductionDetail>(wb, "Production Samples", productionCols(entries), entries, { head: head(), emptyNote: meta.emptyNote });
+  readingSheet(wb, head("L, a, b Measurements"), productionLines(entries));
 }
 
 /** Production Sample Reports: every Production Sample form field of the period's samples. */
-export async function productionWorkbook(entries: ProductionDetail[]): Promise<Buffer> {
+export async function productionWorkbook(entries: ProductionDetail[], period: string): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
-  addProductionSheets(wb, entries, "No production samples for the selected Production Date.");
+  addProductionSheets(wb, entries, { title: "Production Sample Report", period, emptyNote: "No production samples for the selected Production Date." });
   return finish(wb);
 }
 
@@ -674,6 +743,8 @@ export async function productionWorkbook(entries: ProductionDetail[]): Promise<B
 export async function filteredWorkbook(rows: FilteredRow[], filters: ExportFilters): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const type = sampleTypeOption(filters.sampleType);
+  const period = periodLabel(filters.period);
+  const title = `Filtered Data Export — ${type.label}`;
   const none = "No records match the selected Production Date and filters.";
   addSheet<FilteredRow>(
     wb,
@@ -683,21 +754,23 @@ export async function filteredWorkbook(rows: FilteredRow[], filters: ExportFilte
       { header: "S.No.", width: 8, kind: "number", value: (r) => r.serialNo },
       { header: "Slab Number", width: 12, kind: "number", value: (r) => r.slabNumber },
       { header: "Sample Type", width: 22, value: () => type.record },
+      ...(filters.sampleType === "INWARD" ? [{ header: "Company Name", width: 22, value: (r: FilteredRow) => r.company } as Col<FilteredRow>] : []),
       { header: "Sample Design", width: 24, value: (r) => r.designName },
       { header: "Design Type", width: 28, value: (r) => r.designTypes.join(", ") },
       { header: "Number of Bodies", width: 10, kind: "number", value: (r) => r.numberOfBodies },
     ],
     rows,
-    { emptyNote: none },
+    { head: headOf(title, period), emptyNote: none },
   );
 
-  if (filters.sampleType === "LAB") addLabSheets(wb, rows.flatMap((r) => (r.source === "LAB" ? [r.sample] : [])), none);
-  if (filters.sampleType === "INWARD") addInwardSheets(wb, rows.flatMap((r) => (r.source === "INWARD" ? [r.inward] : [])), none);
-  if (filters.sampleType === "PRODUCTION") addProductionSheets(wb, rows.flatMap((r) => (r.source === "PRODUCTION" ? [r.production] : [])), none);
+  const meta = { title, period, emptyNote: none };
+  if (filters.sampleType === "LAB") addLabSheets(wb, rows.flatMap((r) => (r.source === "LAB" ? [r.sample] : [])), meta);
+  if (filters.sampleType === "INWARD") addInwardSheets(wb, rows.flatMap((r) => (r.source === "INWARD" ? [r.inward] : [])), meta);
+  if (filters.sampleType === "PRODUCTION") addProductionSheets(wb, rows.flatMap((r) => (r.source === "PRODUCTION" ? [r.production] : [])), meta);
 
   const l = filterLabels(filters);
-  addInfoSheet(wb, "Filters Applied", [
-    ["Production Date", periodLabel(filters.period)],
+  addInfoSheet(wb, "Filters Applied", headOf(title, period, "Filters applied"), [
+    ["Production Date", period],
     ["Sample Type", l.sampleType],
     ["Sample Design", l.sampleDesign],
     ["Design Type", l.designType],

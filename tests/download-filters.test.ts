@@ -4,6 +4,9 @@ import {
   applyFilters,
   filterLabels,
   filtersToQuery,
+  parseReportSearch,
+  reportDownloadQuery,
+  reportQueryString,
   inwardDesignTypes,
   labDesignTypes,
   parseFilters,
@@ -95,13 +98,16 @@ describe("filtered export", () => {
   });
 
   it("works on each Sample Type", () => {
-    const e1 = entry({ id: "x", sampleDesignName: "Onyx", plainBody: true, numberOfBodies: 2 });
+    const e1 = entry({ id: "x", sampleDesignName: "Onyx", plainBody: true, numberOfBodies: 2, company: v("c9", "Quartzline") });
     const e2 = entry({ id: "y", serialNo: 2, sampleDesignName: "Onyx", plainBody: false, designTypes: [t("VEIN")] });
     const inward = { type: "INWARD" as const, entries: [e1, e2] };
     expect(applyFilters(inward, base)).toEqual([]); // records of another type never match
     const f = { ...base, sampleType: "INWARD" as const, sampleDesign: "onyx" };
     expect(ids(applyFilters(inward, f))).toEqual(["x", "y"]);
     expect(applyFilters(inward, { ...f, designType: "Vein" })[0]).toMatchObject({ id: "y", source: "INWARD", designName: "Onyx", designTypes: ["Vein"] });
+    // Only Inward / Outward records carry a company.
+    expect(applyFilters(inward, f)[0].company).toBe("Quartzline");
+    expect(applyFilters(lab([s1]), base)[0].company).toBeNull();
     expect(applyFilters(inward, f)[0]).toMatchObject({ numberOfBodies: 2 });
 
     const p1 = prod({ id: "m", designName: "Onyx", numberOfBodies: 3 });
@@ -111,6 +117,19 @@ describe("filtered export", () => {
     expect(ids(applyFilters(production, pf))).toEqual(["m", "n"]);
     expect(ids(applyFilters(production, { ...pf, sampleDesign: "Onyx" }))).toEqual(["m"]);
     expect(ids(applyFilters(production, { ...pf, designType: "Plain Body" }))).toEqual(["n"]);
+  });
+
+  it("Sample Data Download: its own keys, and a download of exactly that period", () => {
+    // Blank page: today's date, the Lab report.
+    expect(parseReportSearch({}, "2026-10-05")).toEqual({ period: day, sampleType: "LAB" });
+    // Its keys start with "d", so the Filtered Data Export's keys on the same page are untouched.
+    const r = parseReportSearch({ show: "1", report: "INWARD", dperiod: "range", dfrom: "2026-10-01", dto: "2026-10-04", period: "all", type: "PRODUCTION" }, "2026-10-05");
+    expect(r.sampleType).toBe("INWARD");
+    expect(r.period).toMatchObject({ mode: "range", from: "2026-10-01", to: "2026-10-04" });
+    expect(parseReportSearch({ report: "NOPE" }, "2026-10-05").sampleType).toBe("LAB");
+    // Search → results → download all say the same thing.
+    expect(parseReportSearch(Object.fromEntries(new URLSearchParams(reportQueryString(r))), "2026-10-05")).toEqual(r);
+    expect(reportDownloadQuery(r)).toBe("kind=inward&period=range&from=2026-10-01&to=2026-10-04");
   });
 
   it("parses URL filters safely", () => {

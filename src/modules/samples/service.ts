@@ -112,10 +112,11 @@ export async function saveLabSample(args: {
   id?: string;
   data: LabFormData;
   user: CurrentUser;
-  /** Create only: the form still shows the suggested Slab Number (allocate it again at save). */
+  /** Create only: the form still shows the suggested S.No. / Slab Number (allocate them again at save). */
+  autoSerial?: boolean;
   autoSlab?: boolean;
-}): Promise<{ id: string; serialNo: number; slabNumber: number | null; removedKeys: string[] }> {
-  const { id, data, user, autoSlab } = args;
+}): Promise<{ id: string; serialNo: number; slabNumber: number | null; notes: string[]; removedKeys: string[] }> {
+  const { id, data, user, autoSerial, autoSlab } = args;
   const canOverride = can(user, "sample.overrideNumbers");
   const canDate = can(user, "sample.changeDate");
   const canAddMaster = can(user, "master.addFromForm");
@@ -150,14 +151,18 @@ export async function saveLabSample(args: {
         // ── date and numbers (S.No. 1, 2, 3 … within the date) ──────────────
         const keptDate = existing ? existing.sampleDate.toISOString().slice(0, 10) : plantToday();
         const sampleDate = dateOnly(canDate ? (data.sampleDate ?? keptDate) : keptDate);
-        const { serialNo, slabNumber, moved, fieldErrors } = await allocateNumbers(labNumbering, tx, {
+        const { serialNo, slabNumber, moved, reordered, notes, fieldErrors } = await allocateNumbers(labNumbering, tx, {
           date: sampleDate,
           existing: existing && { id: existing.id, date: existing.sampleDate, serialNo: existing.serialNo, slabNumber: existing.slabNumber },
+          typedSerial: data.serialNo,
+          autoSerial: !!autoSerial,
           typedSlab: data.slabNumber,
           autoSlab: !!autoSlab,
           canOverride,
         });
         if (Object.keys(fieldErrors).length) throw new LabSaveError("Duplicate number — see the highlighted fields.", fieldErrors);
+        // Records the typed S.No. pushed down keep their copies in step.
+        await refreshRenumbered(tx, reordered);
 
         // ── the sample ───────────────────────────────────────────────────────
         const n = data.numberOfBodies ?? 0;
@@ -311,7 +316,7 @@ export async function saveLabSample(args: {
           userId: user.id,
         });
 
-        return { id: sample.id, serialNo, slabNumber, removedKeys: toRemove.map((a) => a.storageKey) };
+        return { id: sample.id, serialNo, slabNumber, notes, removedKeys: toRemove.map((a) => a.storageKey) };
       },
       { timeout: 30_000, maxWait: 10_000 },
     )

@@ -40,12 +40,12 @@ export function shiftDays(iso: string, n: number): string {
 }
 
 /**
- * Read a period from a URL query (`period`, `date`, `from`, `to`). Invalid
- * dates fall back to today; a reversed range is put the right way round.
- * A bare `date=` (no `period`) is Date Wise, as before.
+ * Read a period from a URL query (`period`, `date`, `from`, `to`, each with
+ * `prefix` in front when given). Invalid dates fall back to today; a reversed
+ * range is put the right way round. A bare `date=` (no `period`) is Date Wise.
  */
-export function parsePeriod(q: Record<string, string | string[] | undefined>, today: string): Period {
-  const one = (k: string) => (Array.isArray(q[k]) ? q[k]![0] : (q[k] as string | undefined)) ?? "";
+export function parsePeriod(q: Record<string, string | string[] | undefined>, today: string, prefix = ""): Period {
+  const one = (k: string) => (Array.isArray(q[`${prefix}${k}`]) ? (q[`${prefix}${k}`] as string[])[0] : (q[`${prefix}${k}`] as string | undefined)) ?? "";
   const raw = one("period");
   const mode: PeriodMode = raw === "all" || raw === "range" ? raw : "date";
   if (mode === "all") return { mode, date: today, from: "", to: today };
@@ -69,10 +69,12 @@ export function periodProblem(p: Period): string | null {
   return null;
 }
 
-export function periodQuery(p: Period): Record<string, string> {
-  if (p.mode === "all") return { period: "all" };
-  if (p.mode === "range") return { period: "range", from: p.from, to: p.to };
-  return { period: "date", date: p.date };
+/** The query a period travels as. `prefix` keeps two searches on one page apart. */
+export function periodQuery(p: Period, prefix = ""): Record<string, string> {
+  const k = (name: string) => `${prefix}${name}`;
+  if (p.mode === "all") return { [k("period")]: "all" };
+  if (p.mode === "range") return { [k("period")]: "range", [k("from")]: p.from, [k("to")]: p.to };
+  return { [k("period")]: "date", [k("date")]: p.date };
 }
 
 /** Is a record dated `iso` (YYYY-MM-DD) inside the period? */

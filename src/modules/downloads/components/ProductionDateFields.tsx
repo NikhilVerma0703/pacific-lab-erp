@@ -18,6 +18,7 @@ export function ProductionDateFields({
   onChange,
   today,
   named,
+  namePrefix = "",
   error,
   fieldClass = "w-full sm:w-48",
 }: {
@@ -26,6 +27,8 @@ export function ProductionDateFields({
   onChange: (p: Period) => void;
   today: string;
   named?: boolean;
+  /** Put in front of the field names, so two searches on one page stay apart. */
+  namePrefix?: string;
   error?: string | null;
   fieldClass?: string;
 }) {
@@ -44,7 +47,7 @@ export function ProductionDateFields({
         <CalendarDays className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-3" />
         <input
           id={`${idPrefix}-${key}`}
-          name={named ? key : undefined}
+          name={named ? `${namePrefix}${key}` : undefined}
           type="date"
           required
           className={cn("input pl-9", error && "input-error")}
@@ -62,7 +65,7 @@ export function ProductionDateFields({
       <Field label="Production Date" htmlFor={`${idPrefix}-period`} className={fieldClass}>
         <select
           id={`${idPrefix}-period`}
-          name={named ? "period" : undefined}
+          name={named ? `${namePrefix}period` : undefined}
           className="input"
           value={value.mode}
           onChange={(e) => setMode(e.target.value as PeriodMode)}

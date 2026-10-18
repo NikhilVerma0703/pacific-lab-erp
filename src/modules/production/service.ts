@@ -36,10 +36,11 @@ export async function saveProductionSample(args: {
   id?: string;
   data: ProductionFormData;
   user: CurrentUser;
-  /** Create only: the form still shows the suggested Slab Number (allocate it again at save). */
+  /** Create only: the form still shows the suggested S.No. / Slab Number (allocate them again at save). */
+  autoSerial?: boolean;
   autoSlab?: boolean;
-}): Promise<{ id: string; serialNo: number; slabNumber: number | null; removedKeys: string[] }> {
-  const { id, data, user, autoSlab } = args;
+}): Promise<{ id: string; serialNo: number; slabNumber: number | null; notes: string[]; removedKeys: string[] }> {
+  const { id, data, user, autoSerial, autoSlab } = args;
   const canOverride = can(user, "production.overrideNumbers");
   const canDate = can(user, "production.changeDate");
   const canAddMaster = can(user, "master.addFromForm");
@@ -64,9 +65,12 @@ export async function saveProductionSample(args: {
           : existing
             ? existing.sampleDate
             : dateOnly(plantToday());
-        const { serialNo, slabNumber, moved, fieldErrors } = await allocateNumbers(productionNumbering, tx, {
+        // Production samples have no separate record copy, so a shifted S.No. needs no refresh.
+        const { serialNo, slabNumber, moved, notes, fieldErrors } = await allocateNumbers(productionNumbering, tx, {
           date: sampleDate,
           existing: existing && { id: existing.id, date: existing.sampleDate, serialNo: existing.serialNo, slabNumber: existing.slabNumber },
+          typedSerial: data.serialNo,
+          autoSerial: !!autoSerial,
           typedSlab: data.slabNumber,
           autoSlab: !!autoSlab,
           canOverride,
@@ -151,7 +155,7 @@ export async function saveProductionSample(args: {
           userId: user.id,
         });
 
-        return { id: sample.id, serialNo, slabNumber, removedKeys: toRemove.map((a) => a.storageKey) };
+        return { id: sample.id, serialNo, slabNumber, notes, removedKeys: toRemove.map((a) => a.storageKey) };
       },
       { timeout: 20_000, maxWait: 10_000 },
     )

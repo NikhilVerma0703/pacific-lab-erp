@@ -1,6 +1,6 @@
 "use client";
 
-import { MessagesSquare, Plus, SendHorizontal } from "lucide-react";
+import { Megaphone, Plus, SendHorizontal } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -24,8 +24,9 @@ import { PostCard } from "./PostCard";
 type Filter = "ALL" | PostStatus;
 
 /**
- * Forum: instructions, tasks, queries and announcements from the Lab Head /
- * Plant Head / CEO, each with its own reply thread for Lab and R&D users.
+ * Announcement: instructions, tasks, queries and announcements from the Lab
+ * Head / Plant Head / CEO, each with its own reply thread for Lab and R&D
+ * users. (The section was called Forum; the tables keep that name.)
  */
 export function Forum({
   posts,
@@ -132,10 +133,10 @@ export function Forum({
   ];
 
   return (
-    <section id="forum" className="scroll-mt-20" aria-labelledby="forum-h">
+    <section id="announcements" className="scroll-mt-20" aria-labelledby="forum-h">
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <h2 id="forum-h" className="flex items-center gap-2 text-[13px] font-bold tracking-widest text-ink-2 uppercase">
-          <MessagesSquare className="size-4" /> Posts
+          <Megaphone className="size-4" /> Posts
         </h2>
         <span className="flex-1" />
         {canPost && (
@@ -274,7 +275,7 @@ export function Forum({
       <ConfirmDialog
         open={!!removing}
         title="Remove post?"
-        message={<p>“{removing ? postHeading(removing) : ""}” and its replies will no longer be shown in the Forum. They stay in the records.</p>}
+        message={<p>“{removing ? postHeading(removing) : ""}” and its replies will no longer be shown in Announcement. They stay in the records.</p>}
         confirmLabel="Remove"
         busy={pending}
         onCancel={() => setRemoving(null)}

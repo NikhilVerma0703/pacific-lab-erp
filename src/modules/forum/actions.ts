@@ -10,12 +10,13 @@ import { POST_STATUS_LABEL } from "./kinds";
 import { postHeading, postSchema, replySchema, statusSchema, type PostInput, type ReplyInput } from "./schema";
 
 /**
- * Forum actions. Posts come from the Lab Head / Plant Head / CEO ("forum.post");
+ * Announcement actions (the section was called Forum; the data keeps that name).
+ * Posts come from the Lab Head / Plant Head / CEO ("forum.post");
  * Lab and R&D users reply ("forum.reply"). Nothing is hard-deleted: a removed
  * post is archived and a removed reply is hidden, so the record stays.
  */
 
-const PATH = "/forum";
+const PATH = "/announcements";
 
 function fieldErrors(e: z.ZodError) {
   const out: Record<string, string> = {};
@@ -47,7 +48,7 @@ export async function saveForumPostAction(input: PostInput, id?: string): Promis
       return p;
     });
     revalidatePath(PATH);
-    return { ok: true, data: { id: saved.id }, message: id ? "Post updated." : "Posted to the Forum." };
+    return { ok: true, data: { id: saved.id }, message: id ? "Post updated." : "Posted to Announcement." };
   } catch (e) {
     if (e instanceof NotFound) return fail("This post no longer exists.");
     if (e instanceof PermissionError) return fail("You can only change posts you created.");
@@ -56,7 +57,7 @@ export async function saveForumPostAction(input: PostInput, id?: string): Promis
   }
 }
 
-/** Remove a post from the Forum. Archived, not deleted — the thread stays on record. */
+/** Remove a post from Announcement. Archived, not deleted — the thread stays on record. */
 export async function archiveForumPostAction(id: string): Promise<ActionResult> {
   try {
     const user = await requirePermission("forum.post");
@@ -68,7 +69,7 @@ export async function archiveForumPostAction(id: string): Promise<ActionResult> 
       await audit(tx, { entityType: "ForumPost", entityId: id, action: "ARCHIVE", summary: postHeading(cur), userId: user.id });
     });
     revalidatePath(PATH);
-    return { ok: true, data: undefined, message: "Post removed from the Forum." };
+    return { ok: true, data: undefined, message: "Post removed from Announcement." };
   } catch (e) {
     if (e instanceof PermissionError) return fail(e.message);
     console.error("archiveForumPostAction", e);

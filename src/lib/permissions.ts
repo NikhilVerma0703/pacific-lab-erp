@@ -23,8 +23,8 @@ const PERMISSIONS = {
   "sample.create": ["ADMIN", "MANAGER", "OPERATOR"],
   "sample.edit": ["ADMIN", "MANAGER", "OPERATOR"],
   "sample.delete": ["ADMIN", "MANAGER"],
-  /** Type a S.No. / Slab Number instead of taking the suggested one. */
-  "sample.overrideNumbers": ["ADMIN", "MANAGER"],
+  /** Type a S.No. / Slab Number over the suggested one — everyone who may enter records. */
+  "sample.overrideNumbers": ["ADMIN", "MANAGER", "OPERATOR"],
   /** Back-date or forward-date a sample. Others get today's date. */
   "sample.changeDate": ["ADMIN", "MANAGER", "OPERATOR"],
   // Inward / Outward
@@ -32,19 +32,21 @@ const PERMISSIONS = {
   "inward.create": ["ADMIN", "MANAGER", "OPERATOR"],
   "inward.edit": ["ADMIN", "MANAGER", "OPERATOR"],
   "inward.delete": ["ADMIN", "MANAGER"],
-  "inward.overrideNumbers": ["ADMIN", "MANAGER"],
+  "inward.overrideNumbers": ["ADMIN", "MANAGER", "OPERATOR"],
   // Production Sample (received from the plant) — same rules as lab samples
   "production.view": ["ADMIN", "MANAGER", "OPERATOR", "VIEWER"],
   "production.create": ["ADMIN", "MANAGER", "OPERATOR"],
   "production.edit": ["ADMIN", "MANAGER", "OPERATOR"],
   "production.delete": ["ADMIN", "MANAGER"],
-  "production.overrideNumbers": ["ADMIN", "MANAGER"],
+  "production.overrideNumbers": ["ADMIN", "MANAGER", "OPERATOR"],
   "production.changeDate": ["ADMIN", "MANAGER", "OPERATOR"],
-  // Dashboard & Forum
+  /** Slab Records — searching saved slabs by L, a, b or by date / slab / design. */
+  "slab.view": ["ADMIN", "MANAGER", "OPERATOR", "VIEWER"],
+  // Dashboard & Announcement (the section once called Forum — keys unchanged)
   "dashboard.view": ["ADMIN", "MANAGER", "OPERATOR", "VIEWER"],
-  /** Open the Forum section and read its posts. */
+  /** Open the Announcement section and read its posts. */
   "forum.view": ["ADMIN", "MANAGER", "OPERATOR", "VIEWER"],
-  /** Start a Forum post — Lab Head / Plant Head / CEO (Manager or Admin). */
+  /** Start an Announcement post — Lab Head / Plant Head / CEO (Manager or Admin). */
   "forum.post": ["ADMIN", "MANAGER"],
   /** Reply in a post's thread — Lab and R&D users too. */
   "forum.reply": ["ADMIN", "MANAGER", "OPERATOR"],

@@ -17,10 +17,13 @@ export interface DateNumbers {
 /**
  * Date, S.No. and Slab Number — the same in every form.
  *  - Date: today for a new entry; any date can be picked for older records.
- *  - S.No.: 1, 2, 3 … within the selected date, from the saved records
- *    (shown here, assigned at save). Picking another date recalculates it.
- *  - Slab Number: typed by hand for the first entry of a date; later entries
- *    of that date start from the previous entry's slab + 1.
+ *  - S.No.: 1, 2, 3 … within the selected date, from the saved records.
+ *    Picking another date recalculates it.
+ *  - Slab Number: the previous entry's slab + 1; typed by hand for the first
+ *    entry of a date.
+ * Both numbers are only suggestions: they can be typed over before saving.
+ * A typed S.No. puts the record at that place in its date and moves the
+ * entries after it down one, so the date keeps running 1, 2, 3 …
  * The form holds `${dateName}`, `serialNo` and `slabNumber` (strings).
  */
 export function DateNumberFields({
@@ -39,9 +42,10 @@ export function DateNumberFields({
   /** The numbers the page was rendered with (for the date in the form). */
   initial: DateNumbers;
   fetchNumbers: (date: string) => Promise<DateNumbers>;
-  /** Called whenever new numbers arrive (the form remembers the suggested slab). */
+  /** Called whenever new numbers arrive (the form remembers the suggested numbers). */
   onNumbers?: (n: DateNumbers) => void;
   canChangeDate: boolean;
+  /** This role may type over the suggested S.No. and Slab Number. */
   canOverride: boolean;
 }) {
   const { control, register, setValue, getValues, formState } = useFormContext<FieldValues>();
@@ -76,15 +80,32 @@ export function DateNumberFields({
 
   // Moved to another date on an edit, or a new entry: the S.No. comes from that date.
   const onOwnDate = mode === "edit" && date === savedDate.current;
-  const slabEditable = mode === "create" ? numbers.first || canOverride : canOverride;
-  const slabHint =
-    mode === "edit"
+  const serialHint = loading
+    ? "Checking this date…"
+    : !canOverride
+      ? onOwnDate
+        ? undefined
+        : "Next S.No. for this date."
+      : onOwnDate
+        ? `S.No. on this date. Type another to move it — the rest of ${fmt(date)} follows.`
+        : mode === "edit"
+          ? `S.No. on the new date — type another place if you need one.`
+          : numbers.serialNo === 1
+            ? "First entry on this date."
+            : `Next S.No. for this date. Type a lower one to put it earlier — the rest follow.`;
+  const slabHint = !canOverride
+    ? mode === "edit"
       ? undefined
+      : numbers.first
+        ? "First entry on this date — enter the Slab Number."
+        : "Previous entry's Slab Number + 1."
+    : mode === "edit"
+      ? "Change it if the slab was numbered differently."
       : numbers.first
         ? "First entry on this date — enter the Slab Number."
         : numbers.slabNumber === null
           ? "The previous entry of this date has no Slab Number — enter it."
-          : "Previous entry's Slab Number + 1.";
+          : "Previous entry's Slab Number + 1 — change it if you need to.";
 
   return (
     <>
@@ -97,24 +118,30 @@ export function DateNumberFields({
           {...register(dateName)}
         />
       </Field>
-      <Field
-        label="S.No."
-        htmlFor={`${idPrefix}-serialNo`}
-        error={errorAt(errors, "serialNo")}
-        hint={loading ? "Checking this date…" : onOwnDate ? undefined : mode === "edit" ? "S.No. on the new date — given at save." : "Next S.No. for this date."}
-      >
-        <input id={`${idPrefix}-serialNo`} inputMode="numeric" readOnly className="input bg-mute-bg tabular-nums text-ink-2" {...register("serialNo")} />
+      <Field label="S.No." htmlFor={`${idPrefix}-serialNo`} error={errorAt(errors, "serialNo")} hint={serialHint}>
+        <input
+          id={`${idPrefix}-serialNo`}
+          inputMode="numeric"
+          readOnly={!canOverride}
+          className={cn("input tabular-nums", !canOverride && "bg-mute-bg text-ink-2", errorAt(errors, "serialNo") && "input-error")}
+          {...register("serialNo")}
+        />
       </Field>
       <Field label="Slab Number" htmlFor={`${idPrefix}-slabNumber`} error={errorAt(errors, "slabNumber")} hint={slabHint}>
         <input
           id={`${idPrefix}-slabNumber`}
           inputMode="numeric"
-          readOnly={!slabEditable}
-          placeholder={slabEditable ? "Enter slab number" : undefined}
-          className={cn("input tabular-nums", !slabEditable && "bg-mute-bg text-ink-2", errorAt(errors, "slabNumber") && "input-error")}
+          readOnly={!canOverride}
+          placeholder={canOverride ? "Enter slab number" : undefined}
+          className={cn("input tabular-nums", !canOverride && "bg-mute-bg text-ink-2", errorAt(errors, "slabNumber") && "input-error")}
           {...register("slabNumber")}
         />
       </Field>
     </>
   );
+}
+
+/** "18-10-2026" — the date a hint talks about. */
+function fmt(iso: string | undefined) {
+  return iso && /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso.split("-").reverse().join("-") : "that date";
 }

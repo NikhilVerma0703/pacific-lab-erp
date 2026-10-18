@@ -15,7 +15,7 @@ export interface ModuleDef {
   label: string;
   href: string;
   /** lucide-react icon name, resolved in the shell. */
-  icon: "LayoutDashboard" | "MessagesSquare" | "FlaskConical" | "ArrowLeftRight" | "Factory" | "BarChart3" | "Download" | "Database";
+  icon: "LayoutDashboard" | "Megaphone" | "FlaskConical" | "ArrowLeftRight" | "Factory" | "Layers" | "BarChart3" | "Download" | "Database";
   description: string;
   permission: Permission;
   status: ModuleStatus;
@@ -32,10 +32,10 @@ export const MODULES: ModuleDef[] = [
     status: "live",
   },
   {
-    key: "forum",
-    label: "Forum",
-    href: "/forum",
-    icon: "MessagesSquare",
+    key: "announcements",
+    label: "Announcement",
+    href: "/announcements",
+    icon: "Megaphone",
     description: "Announcements, posts and replies",
     permission: "forum.view",
     status: "live",
@@ -65,6 +65,15 @@ export const MODULES: ModuleDef[] = [
     icon: "Factory",
     description: "Samples received from the production plant and their readings",
     permission: "production.view",
+    status: "live",
+  },
+  {
+    key: "slab-records",
+    label: "Slab Records",
+    href: "/slab-records",
+    icon: "Layers",
+    description: "Find a slab made before — by L, a, b, or by date, slab number and design",
+    permission: "slab.view",
     status: "live",
   },
   {

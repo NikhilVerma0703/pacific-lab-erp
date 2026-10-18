@@ -24,7 +24,7 @@ export interface PostCardPermissions {
 }
 
 /**
- * One Forum post and its thread: the original post on white, the replies
+ * One Announcement post and its thread: the original post on white, the replies
  * underneath on a tinted panel joined by a thread line, then the reply box.
  */
 export function PostCard({

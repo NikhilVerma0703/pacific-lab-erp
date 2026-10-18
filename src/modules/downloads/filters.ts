@@ -26,6 +26,33 @@ export const SAMPLE_TYPE_OPTIONS: { value: SampleType; label: string; record: st
 
 export const sampleTypeOption = (t: SampleType) => SAMPLE_TYPE_OPTIONS.find((o) => o.value === t)!;
 
+/** The Sample Data Download search travels under its own keys, so both searches share the page. */
+export const REPORT_PREFIX = "d";
+
+/** The report a Sample Data Download search asks for, and the dates it covers. */
+export interface ReportSearch {
+  period: Period;
+  sampleType: SampleType;
+}
+
+/** Read the Sample Data Download search from a URL query (its keys start with "d"). */
+export function parseReportSearch(q: Record<string, string | string[] | undefined>, today: string): ReportSearch {
+  const one = (k: string) => (Array.isArray(q[k]) ? q[k]![0] : (q[k] as string | undefined)) ?? "";
+  const type = one("report");
+  return {
+    period: parsePeriod(q, today, REPORT_PREFIX),
+    sampleType: (SAMPLE_TYPES as readonly string[]).includes(type) ? (type as SampleType) : "LAB",
+  };
+}
+
+/** One query for the Search form and the results it shows. */
+export const reportQuery = (r: ReportSearch) => ({ show: "1", report: r.sampleType, ...periodQuery(r.period, REPORT_PREFIX) });
+export const reportQueryString = (r: ReportSearch) => new URLSearchParams(reportQuery(r)).toString();
+
+/** The Excel of exactly those records — the API reads plain period keys. */
+export const reportDownloadQuery = (r: ReportSearch) =>
+  new URLSearchParams({ kind: r.sampleType.toLowerCase(), ...periodQuery(r.period) }).toString();
+
 export interface ExportFilters {
   /** Production Date: All / Date Wise / Date Range. */
   period: Period;
@@ -100,6 +127,8 @@ export type FilteredRow = {
   designName: string | null;
   designTypes: string[];
   numberOfBodies: number | null;
+  /** Inward / Outward only. */
+  company: string | null;
 } & ({ source: "LAB"; sample: SampleDetail } | { source: "INWARD"; inward: InwardDetail } | { source: "PRODUCTION"; production: ProductionDetail });
 
 /** The records of the selected type, with each one's Design Name and Design Types. */
@@ -118,6 +147,7 @@ export function toRows(src: FilterSource): FilteredRow[] {
         designName: s.designName,
         designTypes: labDesignTypes(s),
         numberOfBodies: s.numberOfBodies ?? (s.bodies.length || null),
+        company: null,
       }));
     case "INWARD":
       return src.entries.map((e) => ({
@@ -130,6 +160,7 @@ export function toRows(src: FilterSource): FilteredRow[] {
         designName: e.sampleDesignName,
         designTypes: inwardDesignTypes(e),
         numberOfBodies: e.numberOfBodies ?? (e.bodies.length || null),
+        company: e.company?.label ?? null,
       }));
     case "PRODUCTION":
       return src.productions.map((p) => ({
@@ -142,6 +173,7 @@ export function toRows(src: FilterSource): FilteredRow[] {
         designName: p.designName,
         designTypes: productionDesignTypes(p),
         numberOfBodies: p.numberOfBodies ?? (p.bodies.length || null),
+        company: null,
       }));
   }
 }

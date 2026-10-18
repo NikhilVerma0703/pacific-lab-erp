@@ -90,9 +90,10 @@ export function ProductionForm({
         const raw = { ...getValues(), attachmentIds: files.map((f) => f.id) };
         start(async () => {
           // Untouched suggestions are re-allocated by the server, so two people
-          // saving at once never collide on a stale suggestion.
+          // saving at once never collide on a stale one; typed numbers are kept.
           const r = await saveProductionAction(raw, {
             id: entryId,
+            autoSerial: mode === "create" && String(raw.serialNo) === String(numbers.serialNo),
             autoSlab: mode === "create" && numbers.slabNumber !== null && String(raw.slabNumber) === String(numbers.slabNumber),
           });
           if (!r.ok) {

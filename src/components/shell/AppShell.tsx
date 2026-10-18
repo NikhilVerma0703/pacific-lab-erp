@@ -10,9 +10,10 @@ import {
   Download,
   Factory,
   FlaskConical,
+  Layers,
   LayoutDashboard,
+  Megaphone,
   Menu,
-  MessagesSquare,
   X,
 } from "lucide-react";
 import { MODULES, type ModuleDef } from "@/modules/registry";
@@ -20,8 +21,9 @@ import { cn } from "@/lib/utils";
 import { ROLE_LABEL, type Permission, type Role } from "@/lib/permissions";
 
 const ICONS = {
+  Layers,
   LayoutDashboard,
-  MessagesSquare,
+  Megaphone,
   FlaskConical,
   ArrowLeftRight,
   Factory,

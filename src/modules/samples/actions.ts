@@ -21,7 +21,7 @@ async function removeFiles(keys: string[]) {
 
 export async function saveLabSampleAction(
   input: LabFormInput,
-  opts: { id?: string; autoSlab?: boolean },
+  opts: { id?: string; autoSerial?: boolean; autoSlab?: boolean },
 ): Promise<ActionResult<{ id: string; serialNo: number; slabNumber: number | null }>> {
   try {
     const user = await requirePermission(opts.id ? "sample.edit" : "sample.create");
@@ -30,17 +30,19 @@ export async function saveLabSampleAction(
     const parsed = labFormSchema.safeParse(visibleLabInput(input));
     if (!parsed.success) return fail("Some values are not valid — see the highlighted fields.", fieldErrorsOf(parsed.error.issues));
 
-    const r = await saveLabSample({ id: opts.id, data: parsed.data, user, autoSlab: !!opts.autoSlab });
+    const r = await saveLabSample({ id: opts.id, data: parsed.data, user, autoSerial: !!opts.autoSerial, autoSlab: !!opts.autoSlab });
     await removeFiles(r.removedKeys);
     revalidatePath(PATH);
     revalidatePath("/dashboard");
     if (opts.id) revalidatePath(`${PATH}/${opts.id}`);
 
+    // A typed S.No. that was out of range comes back changed — say so.
     const what = `S.No. ${r.serialNo}${r.slabNumber ? ` (Slab ${r.slabNumber})` : ""}`;
+    const note = r.notes.length ? ` ${r.notes.join(" ")}` : "";
     return {
       ok: true,
       data: { id: r.id, serialNo: r.serialNo, slabNumber: r.slabNumber },
-      message: opts.id ? `${what} updated.` : `Lab sample saved — ${what}.`,
+      message: (opts.id ? `${what} updated.` : `Lab sample saved — ${what}.`) + note,
     };
   } catch (e) {
     if (e instanceof PermissionError) return fail(e.message);

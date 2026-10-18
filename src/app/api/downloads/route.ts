@@ -5,7 +5,7 @@ import { currentUser } from "@/lib/session";
 import { filterSource, inwardIn, productionIn, samplesIn } from "@/modules/downloads/data";
 import { filteredWorkbook, inwardWorkbook, labWorkbook, productionWorkbook } from "@/modules/downloads/excel";
 import { applyFilters, parseFilters, sampleTypeOption, type SampleType } from "@/modules/downloads/filters";
-import { isIsoDate, parsePeriod, periodFileTag } from "@/modules/downloads/period";
+import { isIsoDate, parsePeriod, periodFileTag, periodLabel } from "@/modules/downloads/period";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +49,13 @@ export async function GET(req: Request) {
       case "production": {
         const t = report!;
         if (!can(user, sampleTypeOption(t).permission)) return refuse(t);
-        file = t === "LAB" ? await labWorkbook(await samplesIn(period)) : t === "INWARD" ? await inwardWorkbook(await inwardIn(period)) : await productionWorkbook(await productionIn(period));
+        const label = periodLabel(period);
+        file =
+          t === "LAB"
+            ? await labWorkbook(await samplesIn(period), label)
+            : t === "INWARD"
+              ? await inwardWorkbook(await inwardIn(period), label)
+              : await productionWorkbook(await productionIn(period), label);
         name = `${FILE[t]}-Report_${tag}.xlsx`;
         break;
       }

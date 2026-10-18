@@ -96,9 +96,11 @@ export function ProductionRegister({
         <p className="px-5 py-10 text-center text-sm text-ink-3">No production samples saved yet.</p>
       ) : (
         <>
-          {/* Desktop / landscape tablet: table */}
-          <div className="hidden overflow-x-auto lg:block">
-            <table className="w-full text-[14px]">
+          {/* The table scrolls sideways on a tablet — nothing is left out. */}
+          <p className="hidden border-b border-line px-4 pb-2 text-[12px] text-ink-3 sm:block lg:hidden sm:px-5">Scroll the table sideways to see every column.</p>
+          {/* Tablet and desktop: the complete table, scrolling sideways when it does not fit */}
+          <div className="hidden overflow-x-auto sm:block">
+            <table className="w-full min-w-[58rem] text-[14px]">
               <thead>
                 <tr>
                   <th className="th whitespace-normal">Date</th>
@@ -137,8 +139,8 @@ export function ProductionRegister({
             </table>
           </div>
 
-          {/* Phone / portrait tablet: cards */}
-          <ul className="divide-y divide-line lg:hidden">
+          {/* Phone: the same fields as cards */}
+          <ul className="divide-y divide-line sm:hidden">
             {visible.map((r) => (
               <li key={r.id} className="space-y-3 px-4 py-4" data-row-id={r.id}>
                 <div>

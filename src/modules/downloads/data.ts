@@ -58,17 +58,6 @@ export async function filterSource(type: SampleType, period: Period): Promise<Fi
   }
 }
 
-/** How many records the period holds, per form. */
-export async function countsIn(period: Period) {
-  const w = periodWhere(period);
-  const [samples, inward, production] = await Promise.all([
-    prisma.labSample.count({ where: { sampleDate: w } }),
-    prisma.inwardOutwardEntry.count({ where: { entryDate: w } }),
-    prisma.productionSample.count({ where: { sampleDate: w } }),
-  ]);
-  return { samples, inward, production };
-}
-
 /** Labels, each once (ignoring case and spaces), A–Z. */
 function distinctLabels(labels: (string | null | undefined)[]): string[] {
   const seen = new Map<string, string>();
